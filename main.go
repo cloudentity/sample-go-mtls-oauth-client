@@ -1,22 +1,25 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"flag"
 	"fmt"
-	"github.com/cloudentity/sample-go-mtls-oauth-client/pkg/acp"
 	"log"
 	"net/http"
 	"strconv"
+
+	"github.com/cloudentity/sample-go-mtls-oauth-client/pkg/acp"
 )
 
 var (
 	acpOAuthConfig acp.Config
 
-	clientID = flag.String("clientId", "", "Application client ID")
-	acpURL   = flag.String("acpUrl", "https://localhost:8443/default/default/oauth2", "ACP URL with provided tenant, and server ID")
-	port     = flag.String("port", "18888", "Port where callback, and login endpoints will be exposed")
-	certPath = flag.String("cert", "certs/cert.pem", "A path to the file with a certificate")
-	keyPath  = flag.String("key", "certs/key.pem", "A path to the file with a private key")
+	clientID       = flag.String("clientId", "", "Application client ID")
+	issuerURL      = flag.String("issuerUrl", "https://localhost:8443/default/default", "Issuer URL with provided tenant, and server ID")
+	port           = flag.String("port", "18888", "Port where callback, and login endpoints will be exposed")
+	certPath       = flag.String("cert", "certs/cert.pem", "A path to the file with a certificate")
+	keyPath        = flag.String("key", "certs/cert-key.pem", "A path to the file with a private key")
 	serverCertPath = flag.String("serverCert", "certs/server-cert.pem", "A path to the file with a server certificate")
 )
 
@@ -36,8 +39,8 @@ func main() {
 		RedirectURL: fmt.Sprintf("http://localhost:%v/callback", serverPort),
 		ClientID:    *clientID,
 		Scopes:      []string{"openid"},
-		AuthURL:     fmt.Sprintf("%v/authorize", *acpURL),
-		TokenURL:    fmt.Sprintf("%v/token", *acpURL),
+		AuthURL:     fmt.Sprintf("%v/oauth2/authorize", *issuerURL),
+		TokenURL:    fmt.Sprintf("%v/oauth2/token", *issuerURL),
 	}
 
 	if acpClient, err = acp.NewClient(*serverCertPath, *certPath, *keyPath, acpOAuthConfig); err != nil {
@@ -66,10 +69,11 @@ func login(writer http.ResponseWriter, request *http.Request) {
 }
 
 func callback(client acp.Client) func(http.ResponseWriter, *http.Request) {
-	return func(_ http.ResponseWriter, request *http.Request) {
+	return func(writer http.ResponseWriter, request *http.Request) {
 		var (
-			body []byte
-			err  error
+			body       []byte
+			err        error
+			prettyJSON bytes.Buffer
 
 			code = request.URL.Query().Get("code")
 		)
@@ -79,6 +83,14 @@ func callback(client acp.Client) func(http.ResponseWriter, *http.Request) {
 			return
 		}
 
-		log.Println(string(body))
+		if err = json.Indent(&prettyJSON, body, "", "\t"); err != nil {
+			log.Printf("error while decoding successful body response: %v\n", err)
+			return
+		}
+
+		if _, err = fmt.Fprint(writer, prettyJSON.String()); err != nil {
+			log.Printf("error while writting successful body response: %v\n", err)
+			return
+		}
 	}
 }
