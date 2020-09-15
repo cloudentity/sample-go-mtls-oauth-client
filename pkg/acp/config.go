@@ -12,9 +12,10 @@ type Config struct {
 	Scopes      []string
 	AuthURL     string
 	TokenURL    string
+	PKCEEnabled bool
 }
 
-func (c Config) AuthorizeURL() string {
+func (c Config) AuthorizeURL(challenge string) string {
 	var (
 		buf bytes.Buffer
 
@@ -25,6 +26,11 @@ func (c Config) AuthorizeURL() string {
 			"scope":         {strings.Join(c.Scopes, " ")},
 		}
 	)
+
+	if c.PKCEEnabled {
+		queryParams.Add("code_challenge", challenge)
+		queryParams.Add("code_challenge_method", "S256")
+	}
 
 	buf.WriteString(c.AuthURL)
 	if strings.Contains(c.AuthURL, "?") {

@@ -5,11 +5,10 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"github.com/cloudentity/sample-go-mtls-oauth-client/pkg/acp"
 	"log"
 	"net/http"
 	"strconv"
-
-	"github.com/cloudentity/sample-go-mtls-oauth-client/pkg/acp"
 )
 
 var (
@@ -21,6 +20,7 @@ var (
 	certPath       = flag.String("cert", "certs/cert.pem", "A path to the file with a certificate")
 	keyPath        = flag.String("key", "certs/cert-key.pem", "A path to the file with a private key")
 	serverCertPath = flag.String("serverCert", "certs/server-cert.pem", "A path to the file with a server certificate")
+	pkceEnabled    = flag.Bool("pkce", false, "Enables PKCE flow")
 )
 
 func main() {
@@ -28,6 +28,8 @@ func main() {
 		serverPort int
 		acpClient  acp.Client
 		err        error
+		verifier   string
+		challenge  string
 	)
 
 	flag.Parse()
@@ -41,15 +43,19 @@ func main() {
 		Scopes:      []string{"openid"},
 		AuthURL:     fmt.Sprintf("%v/oauth2/authorize", *issuerURL),
 		TokenURL:    fmt.Sprintf("%v/oauth2/token", *issuerURL),
+		PKCEEnabled: *pkceEnabled,
 	}
 
 	if acpClient, err = acp.NewClient(*serverCertPath, *certPath, *keyPath, acpOAuthConfig); err != nil {
 		log.Fatalln(err)
 	}
 
+	verifier = acp.GenerateVerifier()
+	challenge = acp.GenerateChallenge(verifier)
+
 	handler := http.NewServeMux()
-	handler.HandleFunc("/callback", callback(acpClient))
-	handler.HandleFunc("/login", login)
+	handler.HandleFunc("/callback", callback(acpClient, string(verifier)))
+	handler.HandleFunc("/login", login(string(challenge)))
 
 	server := &http.Server{
 		Addr:    fmt.Sprintf("localhost:%v", serverPort),
@@ -64,11 +70,13 @@ func main() {
 	}
 }
 
-func login(writer http.ResponseWriter, request *http.Request) {
-	http.Redirect(writer, request, acpOAuthConfig.AuthorizeURL(), http.StatusTemporaryRedirect)
+func login(challenge string) func(http.ResponseWriter, *http.Request) {
+	return func(writer http.ResponseWriter, request *http.Request) {
+		http.Redirect(writer, request, acpOAuthConfig.AuthorizeURL(challenge), http.StatusTemporaryRedirect)
+	}
 }
 
-func callback(client acp.Client) func(http.ResponseWriter, *http.Request) {
+func callback(client acp.Client, verfier string) func(http.ResponseWriter, *http.Request) {
 	return func(writer http.ResponseWriter, request *http.Request) {
 		var (
 			body       []byte
@@ -78,7 +86,7 @@ func callback(client acp.Client) func(http.ResponseWriter, *http.Request) {
 			code = request.URL.Query().Get("code")
 		)
 
-		if body, err = client.Exchange(code); err != nil {
+		if body, err = client.Exchange(code, verfier); err != nil {
 			log.Printf("%v\n", err)
 			return
 		}

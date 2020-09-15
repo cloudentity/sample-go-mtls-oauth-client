@@ -42,12 +42,16 @@ func NewClient(serverCertPath string, certPath string, keyPath string, cfg Confi
 	return Client{HttpClient: httpClient, config: cfg}, nil
 }
 
-func (c Client) Exchange(code string) (body []byte, err error) {
+func (c Client) Exchange(code string, verifier string) (body []byte, err error) {
 	values := url.Values{
 		"grant_type":   {"authorization_code"},
 		"code":         {code},
 		"client_id":    {c.config.ClientID},
 		"redirect_uri": {c.config.RedirectURL},
+	}
+
+	if c.config.PKCEEnabled {
+		values.Add("code_verifier", verifier)
 	}
 
 	response, err := c.HttpClient.PostForm(c.config.TokenURL, values)
