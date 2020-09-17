@@ -45,7 +45,7 @@ application with help flag.
 ## How to configure the sample app
 
 1. Go to "Applications" and create a new "Server Web Application" in the ACP dashboard and do the following instructions: 
-    * Change "Token Endpoint Authentication Method" to "self_signed_tls_client_auth".
+    * Change "Token Endpoint Authentication Method" to "tls_client_auth".
     * Change "Redirect URL" to the value from "Callback endpoint" presented in sample application logs.
     * Copy the "Client ID" value it will be used later.
 
