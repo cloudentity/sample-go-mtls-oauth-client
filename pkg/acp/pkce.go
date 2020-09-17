@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"math/rand"
-	"strings"
 	"time"
 )
 
@@ -14,7 +13,7 @@ const challengeLength = 43
 func GenerateChallenge(verifier string) string {
 	hash := sha256.New()
 	hash.Write([]byte(verifier))
-	return encode(hash.Sum(nil))
+	return encode(hash.Sum([]byte{}))
 }
 
 func GenerateVerifier() string {
@@ -28,9 +27,5 @@ func GenerateVerifier() string {
 }
 
 func encode(msg []byte) string {
-	encoded := base64.StdEncoding.EncodeToString(msg)
-	encoded = strings.Replace(encoded, "+", "-", -1)
-	encoded = strings.Replace(encoded, "/", "_", -1)
-	encoded = strings.Replace(encoded, "=", "", -1)
-	return encoded
+	return base64.RawURLEncoding.EncodeToString(msg)
 }
