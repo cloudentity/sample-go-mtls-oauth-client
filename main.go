@@ -2,14 +2,20 @@ package main
 
 import (
 	"bytes"
+	rand "crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"github.com/cloudentity/sample-go-mtls-oauth-client/pkg/acp"
+	"io"
 	"log"
 	"net/http"
 	"strconv"
 )
+
+const challengeLength = 43
 
 var (
 	acpOAuthConfig acp.Config
@@ -28,7 +34,7 @@ func main() {
 		serverPort int
 		acpClient  acp.Client
 		err        error
-		verifier   string
+		verifier   []byte
 		challenge  string
 	)
 
@@ -50,12 +56,17 @@ func main() {
 		log.Fatalln(err)
 	}
 
-	verifier = acp.GenerateVerifier()
-	challenge = acp.GenerateChallenge(verifier)
+	if *pkceEnabled {
+		if verifier, err = GenerateVerifier(); err != nil {
+			log.Fatalln(err)
+		}
+
+		challenge = GenerateChallenge(encode(verifier))
+	}
 
 	handler := http.NewServeMux()
-	handler.HandleFunc("/callback", callback(acpClient, string(verifier)))
-	handler.HandleFunc("/login", login(string(challenge)))
+	handler.HandleFunc("/callback", callback(acpClient, encode(verifier)))
+	handler.HandleFunc("/login", login(challenge))
 
 	server := &http.Server{
 		Addr:    fmt.Sprintf("localhost:%v", serverPort),
@@ -101,4 +112,23 @@ func callback(client acp.Client, verfier string) func(http.ResponseWriter, *http
 			return
 		}
 	}
+}
+
+func GenerateChallenge(verifier string) string {
+	hash := sha256.New()
+	hash.Write([]byte(verifier))
+	return encode(hash.Sum([]byte{}))
+}
+
+func GenerateVerifier() ([]byte, error) {
+	verifier := make([]byte, challengeLength)
+	if _, err := io.ReadFull(rand.Reader, verifier); err != nil {
+		return []byte{}, err
+	}
+
+	return verifier, nil
+}
+
+func encode(msg []byte) string {
+	return base64.RawURLEncoding.WithPadding(base64.NoPadding).EncodeToString(msg)
 }
