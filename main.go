@@ -34,8 +34,6 @@ func main() {
 		serverPort int
 		acpClient  acp.Client
 		err        error
-		verifier   []byte
-		challenge  string
 	)
 
 	flag.Parse()
@@ -56,17 +54,9 @@ func main() {
 		log.Fatalln(err)
 	}
 
-	if *pkceEnabled {
-		if verifier, err = GenerateVerifier(); err != nil {
-			log.Fatalln(err)
-		}
-
-		challenge = GenerateChallenge(encode(verifier))
-	}
-
 	handler := http.NewServeMux()
-	handler.HandleFunc("/callback", callback(acpClient, encode(verifier)))
-	handler.HandleFunc("/login", login(challenge))
+	handler.HandleFunc("/callback", callback(acpClient))
+	handler.HandleFunc("/login", login)
 
 	server := &http.Server{
 		Addr:    fmt.Sprintf("localhost:%v", serverPort),
@@ -81,23 +71,48 @@ func main() {
 	}
 }
 
-func login(challenge string) func(http.ResponseWriter, *http.Request) {
-	return func(writer http.ResponseWriter, request *http.Request) {
-		http.Redirect(writer, request, acpOAuthConfig.AuthorizeURL(challenge), http.StatusTemporaryRedirect)
+func login(writer http.ResponseWriter, request *http.Request) {
+	var (
+		verifier  []byte
+		challenge string
+		err       error
+	)
+
+	if *pkceEnabled {
+		if verifier, err = GenerateVerifier(); err != nil {
+			log.Printf("error while generating challenge, %v\n", err)
+			return
+		}
+
+		challenge = GenerateChallenge(encode(verifier))
 	}
+
+	cookie := http.Cookie{
+		Name:  "verifier",
+		Value: encode(verifier),
+	}
+
+	http.SetCookie(writer, &cookie)
+	http.Redirect(writer, request, acpOAuthConfig.AuthorizeURL(challenge), http.StatusTemporaryRedirect)
 }
 
-func callback(client acp.Client, verfier string) func(http.ResponseWriter, *http.Request) {
+func callback(client acp.Client) func(http.ResponseWriter, *http.Request) {
 	return func(writer http.ResponseWriter, request *http.Request) {
 		var (
 			body       []byte
 			err        error
+			verfier    *http.Cookie
 			prettyJSON bytes.Buffer
 
 			code = request.URL.Query().Get("code")
 		)
 
-		if body, err = client.Exchange(code, verfier); err != nil {
+		if verfier, err = request.Cookie("verifier"); err != nil {
+			log.Printf("%v\n", err)
+			return
+		}
+
+		if body, err = client.Exchange(code, verfier.Value); err != nil {
 			log.Printf("%v\n", err)
 			return
 		}
