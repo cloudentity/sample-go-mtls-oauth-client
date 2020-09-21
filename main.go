@@ -4,6 +4,7 @@ import (
 	"bytes"
 	rand "crypto/rand"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"flag"
@@ -19,10 +20,11 @@ const challengeLength = 43
 
 var (
 	acpOAuthConfig acp.Config
-
 	clientID       = flag.String("clientId", "", "Application client ID")
 	issuerURL      = flag.String("issuerUrl", "https://localhost:8443/default/default", "Issuer URL with provided tenant, and server ID")
 	port           = flag.String("port", "18888", "Port where callback, and login endpoints will be exposed")
+	host           = flag.String("host", "localhost", "Host where your client applications is running")
+	redirectHost   = flag.String("redirectHost", "localhost", "Host where the OAuth Server will redirect to")
 	certPath       = flag.String("cert", "certs/cert.pem", "A path to the file with a certificate")
 	keyPath        = flag.String("key", "certs/cert-key.pem", "A path to the file with a private key")
 	serverCertPath = flag.String("serverCert", "certs/server-cert.pem", "A path to the file with a server certificate")
@@ -42,7 +44,7 @@ func main() {
 	}
 
 	acpOAuthConfig = acp.Config{
-		RedirectURL: fmt.Sprintf("http://localhost:%v/callback", serverPort),
+		RedirectURL: fmt.Sprintf("http://%v:%v/callback", *redirectHost, serverPort),
 		ClientID:    *clientID,
 		Scopes:      []string{"openid"},
 		AuthURL:     fmt.Sprintf("%v/oauth2/authorize", *issuerURL),
@@ -59,8 +61,20 @@ func main() {
 	handler.HandleFunc("/login", login)
 
 	server := &http.Server{
-		Addr:    fmt.Sprintf("localhost:%v", serverPort),
+		Addr:    fmt.Sprintf("%v:%v", *host, serverPort),
 		Handler: handler,
+		TLSConfig: &tls.Config{
+			MinVersion:               tls.VersionTLS12,
+			CurvePreferences:         []tls.CurveID{tls.CurveP521, tls.CurveP384, tls.CurveP256},
+			PreferServerCipherSuites: true,
+			CipherSuites: []uint16{
+				tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+				tls.TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
+				tls.TLS_RSA_WITH_AES_256_GCM_SHA384,
+				tls.TLS_RSA_WITH_AES_256_CBC_SHA,
+			},
+		},
+		TLSNextProto: make(map[string]func(*http.Server, *tls.Conn, http.Handler), 0),
 	}
 
 	fmt.Printf("Login endpoint available at: http://%v/login\nCallback endpoint available at: %v\n\n", server.Addr, acpOAuthConfig.RedirectURL)
@@ -83,7 +97,6 @@ func login(writer http.ResponseWriter, request *http.Request) {
 			log.Printf("error while generating challenge, %v\n", err)
 			return
 		}
-
 		challenge = GenerateChallenge(encode(verifier))
 	}
 
