@@ -10,13 +10,12 @@ import (
 	"flag"
 	"fmt"
 	"github.com/cloudentity/sample-go-mtls-oauth-client/pkg/acp"
+	"github.com/gorilla/securecookie"
 	"io"
 	"log"
 	"net/http"
 	"strconv"
 )
-
-const challengeLength = 43
 
 var (
 	acpOAuthConfig acp.Config
@@ -29,7 +28,11 @@ var (
 	keyPath        = flag.String("key", "certs/cert-key.pem", "A path to the file with a private key")
 	serverCertPath = flag.String("serverCert", "certs/server-cert.pem", "A path to the file with a server certificate")
 	pkceEnabled    = flag.Bool("pkce", false, "Enables PKCE flow")
+
+	secureCookie = securecookie.New(securecookie.GenerateRandomKey(64), securecookie.GenerateRandomKey(32))
 )
+
+const challengeLength = 43
 
 func main() {
 	var (
@@ -86,46 +89,69 @@ func main() {
 }
 
 func login(writer http.ResponseWriter, request *http.Request) {
-	var (
-		verifier  []byte
-		challenge string
-		err       error
-	)
+	var challenge string
 
 	if *pkceEnabled {
-		if verifier, err = GenerateVerifier(); err != nil {
+		var (
+			encodedVerifier    string
+			encodedCookieValue string
+			err                error
+		)
+
+		verifier := make([]byte, challengeLength)
+		if _, err = io.ReadFull(rand.Reader, verifier); err != nil {
 			log.Printf("error while generating challenge, %v\n", err)
 			return
 		}
-		challenge = GenerateChallenge(encode(verifier))
+
+		encodedVerifier = base64.RawURLEncoding.WithPadding(base64.NoPadding).EncodeToString(verifier)
+		if encodedCookieValue, err = secureCookie.Encode("verifier", encodedVerifier); err != nil {
+			log.Printf("error while encoding cookie, %v\n", err)
+			return
+		}
+
+		cookie := http.Cookie{
+			Name:     "verifier",
+			Value:    encodedCookieValue,
+			Path:     "/",
+			Secure:   false,
+			HttpOnly: true,
+		}
+		http.SetCookie(writer, &cookie)
+
+		hash := sha256.New()
+		hash.Write([]byte(encodedVerifier))
+		challenge = base64.RawURLEncoding.WithPadding(base64.NoPadding).EncodeToString(hash.Sum([]byte{}))
 	}
 
-	cookie := http.Cookie{
-		Name:  "verifier",
-		Value: encode(verifier),
-	}
-
-	http.SetCookie(writer, &cookie)
 	http.Redirect(writer, request, acpOAuthConfig.AuthorizeURL(challenge), http.StatusTemporaryRedirect)
 }
 
 func callback(client acp.Client) func(http.ResponseWriter, *http.Request) {
 	return func(writer http.ResponseWriter, request *http.Request) {
 		var (
-			body       []byte
-			err        error
-			verfier    *http.Cookie
-			prettyJSON bytes.Buffer
+			body          []byte
+			err           error
+			verfier       *http.Cookie
+			verifierValue string
+			prettyJSON    bytes.Buffer
 
 			code = request.URL.Query().Get("code")
 		)
 
-		if verfier, err = request.Cookie("verifier"); err != nil {
-			log.Printf("%v\n", err)
-			return
+		if *pkceEnabled {
+			if verfier, err = request.Cookie("verifier"); err != nil {
+				log.Printf("%v\n", err)
+				return
+			}
+
+			if err = secureCookie.Decode("verifier", verfier.Value, &verifierValue); err != nil {
+				log.Printf("%v\n", err)
+				return
+			}
 		}
 
-		if body, err = client.Exchange(code, verfier.Value); err != nil {
+		if body, err = client.Exchange(code, verifierValue); err != nil {
 			log.Printf("%v\n", err)
 			return
 		}
@@ -140,23 +166,4 @@ func callback(client acp.Client) func(http.ResponseWriter, *http.Request) {
 			return
 		}
 	}
-}
-
-func GenerateChallenge(verifier string) string {
-	hash := sha256.New()
-	hash.Write([]byte(verifier))
-	return encode(hash.Sum([]byte{}))
-}
-
-func GenerateVerifier() ([]byte, error) {
-	verifier := make([]byte, challengeLength)
-	if _, err := io.ReadFull(rand.Reader, verifier); err != nil {
-		return []byte{}, err
-	}
-
-	return verifier, nil
-}
-
-func encode(msg []byte) string {
-	return base64.RawURLEncoding.WithPadding(base64.NoPadding).EncodeToString(msg)
 }
