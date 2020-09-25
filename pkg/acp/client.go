@@ -20,7 +20,7 @@ type Client struct {
 func NewClient(serverCertPath string, certPath string, keyPath string, cfg Config) (client Client, err error) {
 	var cert tls.Certificate
 
-	// It sets up the certificate HTTP client needs for TLS communication with a server.
+	// Set up the certificate HTTP client needs for TLS communication with a server.
 	clientCACert, err := ioutil.ReadFile(serverCertPath)
 	if err != nil {
 		return Client{}, fmt.Errorf("could not open cert file %v: %w", certPath, err)
@@ -29,14 +29,14 @@ func NewClient(serverCertPath string, certPath string, keyPath string, cfg Confi
 	clientCertPool := x509.NewCertPool()
 	clientCertPool.AppendCertsFromPEM(clientCACert)
 
-	// It assigns a pool with certificates to the HTTP client.
+	// Assign a pool with certificates to the HTTP client.
 	if cert, err = tls.LoadX509KeyPair(certPath, keyPath); err != nil {
 		return Client{}, fmt.Errorf("could not create acp client: %w", err)
 	}
 
 	httpClient := &http.Client{
 		Transport: &http.Transport{
-			// It assigns a pool with certificates to the HTTP client.
+			// Assign a pool with certificates to the HTTP client.
 			TLSClientConfig: &tls.Config{
 				Certificates: []tls.Certificate{cert},
 				RootCAs:      clientCertPool,

@@ -11,13 +11,13 @@ type Config struct {
 	RedirectURL string
 	// ClientID is the ID of our client registered in ACP.
 	ClientID string
-	// Scopes must be at least a subset of scopes assigned to our application in ACP.
+	// Scopes must be a subset of scopes assigned to our application in ACP.
 	Scopes []string
-	// AuthURL is an URL where users can authenticate.
+	// AuthURL is an endpoint where ACP verifies the identity of the resource owner, and gain authorization grant.
 	AuthURL string
 	// TokenURL holds information about the endpoint where we can exchange code for an access token.
 	TokenURL string
-	// PKCEEnabled is information whether PKCE is enabled or not.
+	// PKCEEnabled pkce on/off flag.
 	PKCEEnabled bool
 }
 
