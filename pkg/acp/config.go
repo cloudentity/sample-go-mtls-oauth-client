@@ -7,14 +7,22 @@ import (
 )
 
 type Config struct {
+	// RedirectURL holds information where to redirect the user after successful authentication.
 	RedirectURL string
-	ClientID    string
-	Scopes      []string
-	AuthURL     string
-	TokenURL    string
+	// ClientID is the ID of our client registered in ACP.
+	ClientID string
+	// Scopes must be a subset of scopes assigned to our application in ACP.
+	Scopes []string
+	// AuthURL is an endpoint where ACP verifies the identity of the resource owner, and gain authorization grant.
+	AuthURL string
+	// TokenURL holds information about the endpoint where we can exchange code for an access token.
+	TokenURL string
+	// PKCEEnabled pkce on/off flag.
 	PKCEEnabled bool
 }
 
+// AuthorizeURL builds the URL where the client will redirect the user after accessing /login endpoint. Challenge is a
+// string used only when PKCE is enabled.
 func (c Config) AuthorizeURL(challenge string) string {
 	var (
 		buf bytes.Buffer
@@ -27,6 +35,7 @@ func (c Config) AuthorizeURL(challenge string) string {
 		}
 	)
 
+	// When PKCE is on, we need to add a code challenge to the authorization request.
 	if c.PKCEEnabled {
 		queryParams.Add("code_challenge", challenge)
 		queryParams.Add("code_challenge_method", "S256")

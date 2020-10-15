@@ -91,6 +91,7 @@ func main() {
 func login(writer http.ResponseWriter, request *http.Request) {
 	var challenge string
 
+	//If PKCE is enabled, generate code verifier and challenge.
 	if *pkceEnabled {
 		var (
 			encodedVerifier    string
@@ -110,6 +111,7 @@ func login(writer http.ResponseWriter, request *http.Request) {
 			return
 		}
 
+		// To preserve code verifier between authorization and callback, we want to store it in a secure cookie.
 		cookie := http.Cookie{
 			Name:     "verifier",
 			Value:    encodedCookieValue,
@@ -136,6 +138,7 @@ func callback(client acp.Client) func(http.ResponseWriter, *http.Request) {
 			verifierValue string
 			prettyJSON    bytes.Buffer
 
+			// The request will contain this code to exchange it for an access token.
 			code = request.URL.Query().Get("code")
 		)
 
@@ -151,6 +154,7 @@ func callback(client acp.Client) func(http.ResponseWriter, *http.Request) {
 			}
 		}
 
+		// Exchange code for an access token, include code verifier to validate it against challenge in ACP.
 		if body, err = client.Exchange(code, verifierValue); err != nil {
 			log.Printf("%v\n", err)
 			return
