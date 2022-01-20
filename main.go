@@ -1,20 +1,17 @@
 package main
 
 import (
-	"bytes"
-	rand "crypto/rand"
-	"crypto/sha256"
 	"crypto/tls"
-	"encoding/base64"
 	"encoding/json"
 	"flag"
 	"fmt"
-	"github.com/cloudentity/sample-go-mtls-oauth-client/pkg/acp"
-	"github.com/gorilla/securecookie"
-	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"strconv"
+
+	acp "github.com/cloudentity/acp-client-go"
+	"github.com/gorilla/securecookie"
 )
 
 var (
@@ -24,9 +21,9 @@ var (
 	port           = flag.String("port", "18888", "Port where callback, and login endpoints will be exposed")
 	host           = flag.String("host", "localhost", "Host where your client applications is running")
 	redirectHost   = flag.String("redirectHost", "localhost", "Host where the OAuth Server will redirect to")
-	certPath       = flag.String("cert", "certs/cert.pem", "A path to the file with a certificate")
-	keyPath        = flag.String("key", "certs/cert-key.pem", "A path to the file with a private key")
-	serverCertPath = flag.String("serverCert", "certs/server-cert.pem", "A path to the file with a server certificate")
+	certPath       = flag.String("cert", "certs/acp_cert.pem", "A path to the file with a certificate")
+	keyPath        = flag.String("key", "certs/acp_key.pem", "A path to the file with a private key")
+	rootCA         = flag.String("serverCert", "certs/ca.pem", "A path to the file with rootCA")
 	pkceEnabled    = flag.Bool("pkce", false, "Enables PKCE flow")
 
 	secureCookie = securecookie.New(securecookie.GenerateRandomKey(64), securecookie.GenerateRandomKey(32))
@@ -34,34 +31,58 @@ var (
 
 const challengeLength = 43
 
+var csrf acp.CSRF
+var authorizeURL string
+
 func main() {
 	var (
-		serverPort int
-		acpClient  acp.Client
-		err        error
+		serverPort  int
+		redirectURL *url.URL
+		url         *url.URL
+		client      acp.Client
+		err         error
 	)
 
 	flag.Parse()
+
 	if serverPort, err = strconv.Atoi(*port); err != nil {
 		log.Fatalln(err)
 	}
 
-	acpOAuthConfig = acp.Config{
-		RedirectURL: fmt.Sprintf("http://%v:%v/callback", *redirectHost, serverPort),
-		ClientID:    *clientID,
-		Scopes:      []string{"openid"},
-		AuthURL:     fmt.Sprintf("%v/oauth2/authorize", *issuerURL),
-		TokenURL:    fmt.Sprintf("%v/oauth2/token", *issuerURL),
-		PKCEEnabled: *pkceEnabled,
+	if url, err = url.Parse(*issuerURL); err != nil {
+		log.Fatal("cloud not parse issuer url")
 	}
 
-	if acpClient, err = acp.NewClient(*serverCertPath, *certPath, *keyPath, acpOAuthConfig); err != nil {
+	if redirectURL, err = url.Parse(fmt.Sprintf("http://%v:%v/callback", *redirectHost, serverPort)); err != nil {
+		log.Fatal(err)
+	}
+
+	if *clientID == "" {
+		log.Fatalln("a client ID is required")
+	}
+
+	cfg := acp.Config{
+		ClientID:    *clientID,
+		RedirectURL: redirectURL,
+		IssuerURL:   url,
+		CertFile:    *certPath,
+		KeyFile:     *keyPath,
+		RootCA:      *rootCA,
+		Scopes:      []string{"openid"},
+	}
+
+	if client, err = acp.New(cfg); err != nil {
 		log.Fatalln(err)
 	}
 
+	if authorizeURL, csrf, err = client.AuthorizeURL(); err != nil {
+		log.Println(err)
+		return
+	}
+
 	handler := http.NewServeMux()
-	handler.HandleFunc("/callback", callback(acpClient))
-	handler.HandleFunc("/login", login)
+	handler.HandleFunc("/callback", callback(client))
+	handler.HandleFunc("/login", login(client))
 
 	server := &http.Server{
 		Addr:    fmt.Sprintf("%v:%v", *host, serverPort),
@@ -80,7 +101,7 @@ func main() {
 		TLSNextProto: make(map[string]func(*http.Server, *tls.Conn, http.Handler), 0),
 	}
 
-	fmt.Printf("Login endpoint available at: http://%v/login\nCallback endpoint available at: %v\n\n", server.Addr, acpOAuthConfig.RedirectURL)
+	fmt.Printf("Login endpoint available at: http://%v/login\nCallback endpoint available at: %v\n\n", server.Addr, cfg.RedirectURL)
 	if err := server.ListenAndServe(); err != http.ErrServerClosed {
 		log.Fatalln(err)
 	} else {
@@ -88,86 +109,31 @@ func main() {
 	}
 }
 
-func login(writer http.ResponseWriter, request *http.Request) {
-	var challenge string
-
-	//If PKCE is enabled, generate code verifier and challenge.
-	if *pkceEnabled {
-		var (
-			encodedVerifier    string
-			encodedCookieValue string
-			err                error
-		)
-
-		verifier := make([]byte, challengeLength)
-		if _, err = io.ReadFull(rand.Reader, verifier); err != nil {
-			log.Printf("error while generating challenge, %v\n", err)
-			return
-		}
-
-		encodedVerifier = base64.RawURLEncoding.WithPadding(base64.NoPadding).EncodeToString(verifier)
-		if encodedCookieValue, err = secureCookie.Encode("verifier", encodedVerifier); err != nil {
-			log.Printf("error while encoding cookie, %v\n", err)
-			return
-		}
-
-		// To preserve code verifier between authorization and callback, we want to store it in a secure cookie.
-		cookie := http.Cookie{
-			Name:     "verifier",
-			Value:    encodedCookieValue,
-			Path:     "/",
-			Secure:   false,
-			HttpOnly: true,
-		}
-		http.SetCookie(writer, &cookie)
-
-		hash := sha256.New()
-		hash.Write([]byte(encodedVerifier))
-		challenge = base64.RawURLEncoding.WithPadding(base64.NoPadding).EncodeToString(hash.Sum([]byte{}))
+func login(client acp.Client) func(w http.ResponseWriter, r *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, authorizeURL, http.StatusTemporaryRedirect)
 	}
 
-	http.Redirect(writer, request, acpOAuthConfig.AuthorizeURL(challenge), http.StatusTemporaryRedirect)
 }
 
 func callback(client acp.Client) func(http.ResponseWriter, *http.Request) {
-	return func(writer http.ResponseWriter, request *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
 		var (
-			body          []byte
-			err           error
-			verfier       *http.Cookie
-			verifierValue string
-			prettyJSON    bytes.Buffer
-
+			token acp.Token
 			// The request will contain this code to exchange it for an access token.
-			code = request.URL.Query().Get("code")
+			code = r.URL.Query().Get("code")
+			err  error
 		)
 
-		if *pkceEnabled {
-			if verfier, err = request.Cookie("verifier"); err != nil {
-				log.Printf("%v\n", err)
-				return
-			}
-
-			if err = secureCookie.Decode("verifier", verfier.Value, &verifierValue); err != nil {
-				log.Printf("%v\n", err)
-				return
-			}
-		}
-
-		// Exchange code for an access token, include code verifier to validate it against challenge in ACP.
-		if body, err = client.Exchange(code, verifierValue); err != nil {
+		// Exchange code for an access token.
+		if token, err = client.Exchange(code, csrf.State, csrf); err != nil {
 			log.Printf("%v\n", err)
+			w.Write([]byte(err.Error()))
 			return
 		}
 
-		if err = json.Indent(&prettyJSON, body, "", "\t"); err != nil {
-			log.Printf("error while decoding successful body response: %v\n", err)
-			return
-		}
-
-		if _, err = fmt.Fprint(writer, prettyJSON.String()); err != nil {
-			log.Printf("error while writting successful body response: %v\n", err)
-			return
+		if err = json.NewEncoder(w).Encode(&token); err != nil {
+			log.Println(err)
 		}
 	}
 }
