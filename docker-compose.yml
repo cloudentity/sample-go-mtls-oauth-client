@@ -1,0 +1,23 @@
+version: '3'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "${PORT}:${PORT}"
+    volumes:
+      - ./certs/ca.pem:/ca.pem
+      - ./certs/cert.pem:/cert.pem
+      - ./certs/key.pem:/key.pem
+    environment:
+      - CLIENT_ID=${CLIENT_ID}
+      - ISSUER_URL=${ISSUER_URL}
+      - PORT=${PORT}
+      - HOST=${HOST}
+      - REDIRECT_HOST=${REDIRECT_HOST}
+      - CERT_PATH=${CERT_PATH}
+      - KEY_PATH=${KEY_PATH}
+      - ROOT_CA=${ROOT_CA}
+      - PKCE_ENABLED=${PKCE_ENABLE}
