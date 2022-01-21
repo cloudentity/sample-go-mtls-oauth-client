@@ -1,7 +1,6 @@
 # sample-go-mtls-oauth-client
 
-Sample Go OAuth client using mTLS certificates for authentication with Cloudentity’s Authorization Control Plane. In this
-example self-signed certificate will be used.
+Sample Go OAuth client using mTLS certificates for authentication with Cloudentity’s Authorization Control Plane. 
 
 ## Prerequisites
 

@@ -3,30 +3,38 @@ package main
 import (
 	"crypto/tls"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"log"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 
 	acp "github.com/cloudentity/acp-client-go"
-	"github.com/gorilla/securecookie"
 )
 
-var (
-	clientID     = flag.String("clientId", "", "Application client ID")
-	wellKnown    = flag.String("wellKnown", "https://cloudentity-bbray.mtls.us.authz.cloudentity.io/cloudentity-bbray/default/.well-known/openid-configuration", "Issuer URL with provided tenant, and server ID")
-	port         = flag.String("port", "18888", "Port where callback, and login endpoints will be exposed")
-	host         = flag.String("host", "localhost", "Host where your client applications is running")
-	redirectHost = flag.String("redirectHost", "localhost", "Host where the OAuth Server will redirect to")
-	certPath     = flag.String("cert", "certs/acp_cert.pem", "A path to the file with a certificate")
-	keyPath      = flag.String("key", "certs/acp_key.pem", "A path to the file with a private key")
-	rootCA       = flag.String("serverCert", "certs/ca.pem", "A path to the file with rootCA")
-	pkceEnabled  = flag.Bool("pkce", false, "Enables PKCE flow")
+// var (
+// 	acpOAuthConfig acp.Config
+// 	clientID       = flag.String("clientId", "", "Application client ID")
+// 	issuerURL      = flag.String("issuerUrl", "https://localhost:8443/default/default", "Issuer URL with provided tenant, and server ID")
+// 	port           = flag.String("port", "18888", "Port where callback, and login endpoints will be exposed")
+// 	host           = flag.String("host", "localhost", "Host where your client applications is running")
+// 	redirectHost   = flag.String("redirectHost", "localhost", "Host where the OAuth Server will redirect to")
+// 	certPath       = flag.String("cert", "certs/acp_cert.pem", "A path to the file with a certificate")
+// 	keyPath        = flag.String("key", "certs/acp_key.pem", "A path to the file with a private key")
+// 	rootCA         = flag.String("serverCert", "certs/ca.pem", "A path to the file with rootCA")
+// 	pkceEnabled    = flag.Bool("pkce", false, "Enables PKCE flow")
 
-	secureCookie = securecookie.New(securecookie.GenerateRandomKey(64), securecookie.GenerateRandomKey(32))
-)
+// 	secureCookie = securecookie.New(securecookie.GenerateRandomKey(64), securecookie.GenerateRandomKey(32))
+// )
+
+func getEnv(key, defaultValue string) string {
+	value := os.Getenv(key)
+	if value == "" {
+		return defaultValue
+	}
+	return value
+}
 
 const challengeLength = 43
 
@@ -37,45 +45,41 @@ func main() {
 	var (
 		serverPort  int
 		redirectURL *url.URL
+		issuerURL   *url.URL
+		clientID    string
 		url         *url.URL
 		client      acp.Client
 		err         error
 	)
 
-
-	testClient, err := http.Get(*wellKnown)
-
-	
-
-
-	flag.Parse()
-
-	if serverPort, err = strconv.Atoi(*port); err != nil {
-		log.Fatalln(err)
-	}
-
-	if url, err = url.Parse(*issuerURL); err != nil {
-		log.Fatal("cloud not parse issuer url")
-	}
-
-	if redirectURL, err = url.Parse(fmt.Sprintf("http://%v:%v/callback", *redirectHost, serverPort)); err != nil {
-		log.Fatal(err)
-	}
-
-	if *clientID == "" {
+	if clientID = getEnv("CLIENT_ID", ""); clientID == "" {
 		log.Fatalln("a client ID is required")
 	}
 
-	token, _ := url.Parse("https://cloudentity-bbray.mtls.us.authz.cloudentity.io/cloudentity-bbray/default/oauth2/token")
+	certPath := getEnv("CERT_PATH", "certs/acp_cert.pem")
+	keyPath := getEnv("KEY_PATH", "certs/acp_cert.pem")
+	rootCA := getEnv("ROOT_CA", "certs/acp_cert.pem")
+	host := getEnv("HOST", "localhost")
+
+	if serverPort, err = strconv.Atoi(getEnv("PORT", "18888")); err != nil {
+		log.Fatalln(err)
+	}
+
+	if issuerURL, err = url.Parse(getEnv("ISSUER_URL", "https://localhost:8443/default/default")); err != nil {
+		log.Fatal("cloud not parse issuer url")
+	}
+
+	if redirectURL, err = url.Parse(fmt.Sprintf("http://%v:%v/callback", getEnv("REDIRECT_HOST", "localhost"), serverPort)); err != nil {
+		log.Fatal(err)
+	}
 
 	cfg := acp.Config{
-		ClientID:    *clientID,
+		ClientID:    clientID,
 		RedirectURL: redirectURL,
-		IssuerURL:   url,
-		TokenURL:    token,
-		CertFile:    *certPath,
-		KeyFile:     *keyPath,
-		RootCA:      *rootCA,
+		IssuerURL:   issuerURL,
+		CertFile:    certPath,
+		KeyFile:     keyPath,
+		RootCA:      rootCA,
 		Scopes:      []string{"openid"},
 	}
 
@@ -93,7 +97,7 @@ func main() {
 	handler.HandleFunc("/login", login(client))
 
 	server := &http.Server{
-		Addr:    fmt.Sprintf("%v:%v", *host, serverPort),
+		Addr:    fmt.Sprintf("%v:%v", host, serverPort),
 		Handler: handler,
 		TLSConfig: &tls.Config{
 			MinVersion:               tls.VersionTLS12,

@@ -6,9 +6,9 @@ services:
       context: .
       dockerfile: Dockerfile
     ports:
-      - 18888:18888
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+      - "18888:18888"
+    networks:
+     - clientnet
     environment:
       - CLIENT_ID=${CLIENT_ID}
       - ISSUER_URL=${ISSUER_URL}
@@ -20,7 +20,7 @@ services:
       - ROOT_CA=${ROOT_CA}
       - PKCE_ENABLED=${PKCE_ENABLED}
 networks:
-  test:
+  clientnet:
     external: true
     name: authorization_system
 
