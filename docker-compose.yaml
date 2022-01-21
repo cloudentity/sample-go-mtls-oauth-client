@@ -5,7 +5,10 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    network_mode: host
+    ports:
+      - 18888:18888
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       - CLIENT_ID=${CLIENT_ID}
       - ISSUER_URL=${ISSUER_URL}
