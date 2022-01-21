@@ -19,3 +19,8 @@ services:
       - KEY_PATH=${KEY_PATH}
       - ROOT_CA=${ROOT_CA}
       - PKCE_ENABLED=${PKCE_ENABLED}
+networks:
+  test:
+    external: true
+    name: authorization_system
+
