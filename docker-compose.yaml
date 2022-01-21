@@ -7,8 +7,6 @@ services:
       dockerfile: Dockerfile
     ports:
       - "18888:18888"
-    networks:
-     - clientnet
     environment:
       - CLIENT_ID=${CLIENT_ID}
       - ISSUER_URL=${ISSUER_URL}
@@ -19,6 +17,8 @@ services:
       - KEY_PATH=${KEY_PATH}
       - ROOT_CA=${ROOT_CA}
       - PKCE_ENABLED=${PKCE_ENABLED}
+    networks:
+      - clientnet
 networks:
   clientnet:
     external: true

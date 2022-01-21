@@ -59,7 +59,7 @@ func main() {
 	certPath := getEnv("CERT_PATH", "certs/acp_cert.pem")
 	keyPath := getEnv("KEY_PATH", "certs/acp_cert.pem")
 	rootCA := getEnv("ROOT_CA", "certs/acp_cert.pem")
-	host := getEnv("HOST", "localhost")
+	// host := getEnv("HOST", "localhost")
 
 	if serverPort, err = strconv.Atoi(getEnv("PORT", "18888")); err != nil {
 		log.Fatalln(err)
@@ -97,7 +97,7 @@ func main() {
 	handler.HandleFunc("/login", login(client))
 
 	server := &http.Server{
-		Addr:    fmt.Sprintf("%v:%v", host, serverPort),
+		Addr:    fmt.Sprintf(":%v", serverPort),
 		Handler: handler,
 		TLSConfig: &tls.Config{
 			MinVersion:               tls.VersionTLS12,
