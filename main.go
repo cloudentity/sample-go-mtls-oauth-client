@@ -43,18 +43,22 @@ var authorizeURL string
 
 func main() {
 	var (
-		serverPort  int
-		redirectURL *url.URL
-		issuerURL   *url.URL
-		clientID    string
-		url         *url.URL
-		client      acp.Client
-		err         error
+		serverPort        int
+		redirectURL       *url.URL
+		issuerURL         *url.URL
+		authorizeEndpoint *url.URL
+		tokenEndpoint     *url.URL
+		clientID          string
+		url               *url.URL
+		client            acp.Client
+		err               error
 	)
 
 	if clientID = getEnv("CLIENT_ID", ""); clientID == "" {
 		log.Fatalln("a client ID is required")
 	}
+
+	// c := http.Get(issuerURL)
 
 	certPath := getEnv("CERT_PATH", "certs/acp_cert.pem")
 	keyPath := getEnv("KEY_PATH", "certs/acp_cert.pem")
@@ -65,7 +69,7 @@ func main() {
 		log.Fatalln(err)
 	}
 
-	if issuerURL, err = url.Parse(getEnv("ISSUER_URL", "https://localhost:8443/default/default")); err != nil {
+	if issuerURL, err = url.Parse(getEnv("ISSUER_URL", "")); err != nil {
 		log.Fatal("cloud not parse issuer url")
 	}
 
@@ -73,14 +77,24 @@ func main() {
 		log.Fatal(err)
 	}
 
+	if authorizeEndpoint, err = url.Parse(getEnv("AUTHORIZATION_ENDPOINT", "")); err != nil {
+		log.Fatal("cloud not parse issuer url")
+	}
+
+	if tokenEndpoint, err = url.Parse(getEnv("MTLS_ENDPOINT_ALIASES_TOKEN_ENDPOINT", "")); err != nil {
+		log.Fatal("cloud not parse issuer url")
+	}
+
 	cfg := acp.Config{
-		ClientID:    clientID,
-		RedirectURL: redirectURL,
-		IssuerURL:   issuerURL,
-		CertFile:    certPath,
-		KeyFile:     keyPath,
-		RootCA:      rootCA,
-		Scopes:      []string{"openid"},
+		ClientID:     clientID,
+		RedirectURL:  redirectURL,
+		TokenURL:     tokenEndpoint,
+		AuthorizeURL: authorizeEndpoint,
+		IssuerURL:    issuerURL,
+		CertFile:     certPath,
+		KeyFile:      keyPath,
+		RootCA:       rootCA,
+		Scopes:       []string{"openid"},
 	}
 
 	if client, err = acp.New(cfg); err != nil {
@@ -113,7 +127,7 @@ func main() {
 		TLSNextProto: make(map[string]func(*http.Server, *tls.Conn, http.Handler), 0),
 	}
 
-	fmt.Printf("Login endpoint available at: http://%v/login\nCallback endpoint available at: %v\n\n", server.Addr, cfg.RedirectURL)
+	fmt.Printf("Login endpoint available at: http://localhost:%v/login\nCallback endpoint available at: %v\n\n", serverPort, cfg.RedirectURL)
 	if err := server.ListenAndServe(); err != http.ErrServerClosed {
 		log.Fatalln(err)
 	} else {

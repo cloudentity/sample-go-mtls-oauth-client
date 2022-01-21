@@ -6,10 +6,12 @@ services:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "18888:18888"
+      - "${PORT}:${PORT}"
     environment:
       - CLIENT_ID=${CLIENT_ID}
       - ISSUER_URL=${ISSUER_URL}
+      - AUTHORIZATION_ENDPOINT=${AUTHORIZATION_ENDPOINT}
+      - MTLS_ENDPOINT_ALIASES_TOKEN_ENDPOINT=${MTLS_ENDPOINT_ALIASES_TOKEN_ENDPOINT}
       - PORT=${PORT}
       - HOST=${HOST}
       - REDIRECT_HOST=${REDIRECT_HOST}
