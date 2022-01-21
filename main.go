@@ -13,29 +13,6 @@ import (
 	acp "github.com/cloudentity/acp-client-go"
 )
 
-// var (
-// 	acpOAuthConfig acp.Config
-// 	clientID       = flag.String("clientId", "", "Application client ID")
-// 	issuerURL      = flag.String("issuerUrl", "https://localhost:8443/default/default", "Issuer URL with provided tenant, and server ID")
-// 	port           = flag.String("port", "18888", "Port where callback, and login endpoints will be exposed")
-// 	host           = flag.String("host", "localhost", "Host where your client applications is running")
-// 	redirectHost   = flag.String("redirectHost", "localhost", "Host where the OAuth Server will redirect to")
-// 	certPath       = flag.String("cert", "certs/acp_cert.pem", "A path to the file with a certificate")
-// 	keyPath        = flag.String("key", "certs/acp_key.pem", "A path to the file with a private key")
-// 	rootCA         = flag.String("serverCert", "certs/ca.pem", "A path to the file with rootCA")
-// 	pkceEnabled    = flag.Bool("pkce", false, "Enables PKCE flow")
-
-// 	secureCookie = securecookie.New(securecookie.GenerateRandomKey(64), securecookie.GenerateRandomKey(32))
-// )
-
-func getEnv(key, defaultValue string) string {
-	value := os.Getenv(key)
-	if value == "" {
-		return defaultValue
-	}
-	return value
-}
-
 const challengeLength = 43
 
 var csrf acp.CSRF
@@ -58,32 +35,23 @@ func main() {
 		log.Fatalln("a client ID is required")
 	}
 
-	// c := http.Get(issuerURL)
-
 	certPath := getEnv("CERT_PATH", "certs/acp_cert.pem")
 	keyPath := getEnv("KEY_PATH", "certs/acp_cert.pem")
 	rootCA := getEnv("ROOT_CA", "certs/acp_cert.pem")
-	// host := getEnv("HOST", "localhost")
 
 	if serverPort, err = strconv.Atoi(getEnv("PORT", "18888")); err != nil {
 		log.Fatalln(err)
 	}
 
-	if issuerURL, err = url.Parse(getEnv("ISSUER_URL", "")); err != nil {
+	if issuerURL, err = url.Parse(getEnv("ISSUER_URL", "https://localhost:8443/default/default")); err != nil {
 		log.Fatal("cloud not parse issuer url")
 	}
 
 	if redirectURL, err = url.Parse(fmt.Sprintf("http://%v:%v/callback", getEnv("REDIRECT_HOST", "localhost"), serverPort)); err != nil {
-		log.Fatal(err)
+		log.Fatal("cloud not parse redirect url")
 	}
 
-	if authorizeEndpoint, err = url.Parse(getEnv("AUTHORIZATION_ENDPOINT", "")); err != nil {
-		log.Fatal("cloud not parse issuer url")
-	}
-
-	if tokenEndpoint, err = url.Parse(getEnv("MTLS_ENDPOINT_ALIASES_TOKEN_ENDPOINT", "")); err != nil {
-		log.Fatal("cloud not parse issuer url")
-	}
+	issuerURL, authorizeEndpoint, tokenEndpoint = getEndpointURLs()
 
 	cfg := acp.Config{
 		ClientID:     clientID,
@@ -162,4 +130,57 @@ func callback(client acp.Client) func(http.ResponseWriter, *http.Request) {
 			log.Println(err)
 		}
 	}
+}
+
+func getEnv(key, defaultValue string) string {
+	value := os.Getenv(key)
+	if value == "" {
+		return defaultValue
+	}
+	return value
+}
+
+func getEndpointURLs() (issuer *url.URL, authorizeEndpoint *url.URL, tokenEndpoint *url.URL) {
+	var (
+		wk   string
+		resp *http.Response
+		err  error
+	)
+
+	if wk = getEnv("WELL_KNOWN_URL", ""); wk == "" {
+		log.Fatal("well known endpoint is required")
+	}
+
+	if resp, err = http.Get(wk); err != nil {
+		log.Fatalf("error retrieving .well-known %v", err)
+	}
+
+	var we WellKnownEndpoints
+	defer resp.Body.Close()
+	json.NewDecoder(resp.Body).Decode(&we)
+
+	if issuer, err = getEndpointURL(we.Issuer); err != nil {
+		log.Fatal("could not get /authorize endpoint from .well-known")
+	}
+	if authorizeEndpoint, err = getEndpointURL(we.AuthorizationEndpoint); err != nil {
+		log.Fatal("could not get /authorize endpoint from .well-known")
+	}
+	if tokenEndpoint, err = getEndpointURL(we.MtlsEndpointAliases.TokenEndpoint); err != nil {
+		log.Fatal("could not get /token endpoint from .well-known")
+	}
+	return issuer, authorizeEndpoint, tokenEndpoint
+}
+
+type WellKnownEndpoints struct {
+	Issuer                string              `json:"issuer"`
+	AuthorizationEndpoint string              `json:"authorization_endpoint"`
+	MtlsEndpointAliases   MtlsEndpointAliases `json:"mtls_endpoint_aliases"`
+}
+
+type MtlsEndpointAliases struct {
+	TokenEndpoint string `json:"token_endpoint"`
+}
+
+func getEndpointURL(s string) (*url.URL, error) {
+	return url.Parse(s)
 }

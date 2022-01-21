@@ -10,6 +10,7 @@ Sample Go OAuth client using mTLS certificates for authentication with Cloudenti
 
 ## How to build and run
 
+You can
 If you do not have Golang installed on your machine you can simply
 build it within a Docker container to do that simply execute 
 ```
