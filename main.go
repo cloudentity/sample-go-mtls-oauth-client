@@ -13,29 +13,6 @@ import (
 	acp "github.com/cloudentity/acp-client-go"
 )
 
-// var (
-// 	acpOAuthConfig acp.Config
-// 	clientID       = flag.String("clientId", "", "Application client ID")
-// 	issuerURL      = flag.String("issuerUrl", "https://localhost:8443/default/default", "Issuer URL with provided tenant, and server ID")
-// 	port           = flag.String("port", "18888", "Port where callback, and login endpoints will be exposed")
-// 	host           = flag.String("host", "localhost", "Host where your client applications is running")
-// 	redirectHost   = flag.String("redirectHost", "localhost", "Host where the OAuth Server will redirect to")
-// 	certPath       = flag.String("cert", "certs/acp_cert.pem", "A path to the file with a certificate")
-// 	keyPath        = flag.String("key", "certs/acp_key.pem", "A path to the file with a private key")
-// 	rootCA         = flag.String("serverCert", "certs/ca.pem", "A path to the file with rootCA")
-// 	pkceEnabled    = flag.Bool("pkce", false, "Enables PKCE flow")
-
-// 	secureCookie = securecookie.New(securecookie.GenerateRandomKey(64), securecookie.GenerateRandomKey(32))
-// )
-
-func getEnv(key, defaultValue string) string {
-	value := os.Getenv(key)
-	if value == "" {
-		return defaultValue
-	}
-	return value
-}
-
 const challengeLength = 43
 
 var csrf acp.CSRF
@@ -53,23 +30,23 @@ func main() {
 	)
 
 	if clientID = getEnv("CLIENT_ID", ""); clientID == "" {
-		log.Fatalln("a client ID is required")
+		log.Fatalln("clientID is required")
 	}
 
-	certPath := getEnv("CERT_PATH", "certs/acp_cert.pem")
-	keyPath := getEnv("KEY_PATH", "certs/acp_cert.pem")
-	rootCA := getEnv("ROOT_CA", "certs/acp_cert.pem")
-	host := getEnv("HOST", "localhost")
+	certPath := getEnv("CERT_PATH", "")
+	keyPath := getEnv("KEY_PATH", "")
+	rootCA := getEnv("ROOT_CA", "")
+	host := getEnv("HOST", "")
 
-	if serverPort, err = strconv.Atoi(getEnv("PORT", "18888")); err != nil {
+	if serverPort, err = strconv.Atoi(getEnv("PORT", "")); err != nil {
 		log.Fatalln(err)
 	}
 
-	if issuerURL, err = url.Parse(getEnv("ISSUER_URL", "https://localhost:8443/default/default")); err != nil {
+	if issuerURL, err = url.Parse(getEnv("ISSUER_URL", "")); err != nil {
 		log.Fatal("cloud not parse issuer url")
 	}
 
-	if redirectURL, err = url.Parse(fmt.Sprintf("http://%v:%v/callback", getEnv("REDIRECT_HOST", "localhost"), serverPort)); err != nil {
+	if redirectURL, err = url.Parse(fmt.Sprintf("http://%v:%v/callback", getEnv("REDIRECT_HOST", ""), serverPort)); err != nil {
 		log.Fatal(err)
 	}
 
@@ -148,4 +125,12 @@ func callback(client acp.Client) func(http.ResponseWriter, *http.Request) {
 			log.Println(err)
 		}
 	}
+}
+
+func getEnv(key, defaultValue string) string {
+	value := os.Getenv(key)
+	if value == "" {
+		return defaultValue
+	}
+	return value
 }

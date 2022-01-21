@@ -5,12 +5,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    ports:
-      - "${PORT}:${PORT}"
-    volumes:
-      - ./certs/ca.pem:/ca.pem
-      - ./certs/cert.pem:/cert.pem
-      - ./certs/key.pem:/key.pem
+    network_mode: host
     environment:
       - CLIENT_ID=${CLIENT_ID}
       - ISSUER_URL=${ISSUER_URL}
@@ -20,4 +15,4 @@ services:
       - CERT_PATH=${CERT_PATH}
       - KEY_PATH=${KEY_PATH}
       - ROOT_CA=${ROOT_CA}
-      - PKCE_ENABLED=${PKCE_ENABLE}
+      - PKCE_ENABLED=${PKCE_ENABLED}
