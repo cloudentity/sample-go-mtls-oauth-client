@@ -7,79 +7,88 @@ import (
 	"log"
 	"net/http"
 	"net/url"
-	"os"
-	"strconv"
 
+	"github.com/caarlos0/env"
 	acp "github.com/cloudentity/acp-client-go"
 )
 
-const challengeLength = 43
+type Config struct {
+	ClientID          string `env:"CLIENT_ID,required"`
+	CertPath          string `env:"CERT_PATH,required"`
+	KeyPath           string `env:"KEY_PATH,required"`
+	RootCA            string `env:"ROOT_CA,required"`
+	PORT              int    `env:"PORT,required"`
+	RedirectHost      string `env:"REDIRECT_HOST,required"`
+	WellKnown         string `env:"WELL_KNOWN_URL,required"`
+	WellKnownURL      *url.URL
+	IssuerURL         *url.URL `env:"ISSUER_URL"`
+	AuthorizeEndpoint *url.URL `env:"AUTHORIZATION_ENDPOINT"`
+	TokenEndpoint     *url.URL `env:"MTLS_ENDPOINT_ALIASES_TOKEN_ENDPOINT"`
+}
 
-var csrf acp.CSRF
-var authorizeURL string
+func (c Config) NewClientConfig() acp.Config {
+	var (
+		redirectURL *url.URL
+		err         error
+	)
+
+	if redirectURL, err = url.Parse(fmt.Sprintf("http://%v:%v/callback", c.RedirectHost, c.PORT)); err != nil {
+		log.Fatalf("failed to get callback url from host %v", err)
+	}
+
+	return acp.Config{
+		ClientID:     c.ClientID,
+		RedirectURL:  redirectURL,
+		TokenURL:     c.TokenEndpoint,
+		AuthorizeURL: c.AuthorizeEndpoint,
+		IssuerURL:    c.IssuerURL,
+		CertFile:     c.CertPath,
+		KeyFile:      c.KeyPath,
+		RootCA:       c.RootCA,
+		Scopes:       []string{"openid"},
+	}
+}
+
+func LoadConfig() (config Config, err error) {
+	if err = env.Parse(&config); err != nil {
+		return config, err
+	}
+
+	if config.WellKnownURL, err = url.Parse(config.WellKnown); err != nil {
+		log.Fatalf("failed to parse wellknown as url %v", err)
+	}
+
+	config.fetchEndpointURLs()
+	return config, err
+}
 
 func main() {
 	var (
-		serverPort        int
-		redirectURL       *url.URL
-		issuerURL         *url.URL
-		authorizeEndpoint *url.URL
-		tokenEndpoint     *url.URL
-		clientID          string
-		url               *url.URL
-		client            acp.Client
-		err               error
+		config       Config
+		authorizeURL string
+		csrf         acp.CSRF
+		client       acp.Client
+		err          error
 	)
 
-	if clientID = getEnv("CLIENT_ID", ""); clientID == "" {
-		log.Fatalln("a client ID is required")
+	if config, err = LoadConfig(); err != nil {
+		log.Fatalf("failed to load config %v", err)
 	}
 
-	certPath := getEnv("CERT_PATH", "certs/acp_cert.pem")
-	keyPath := getEnv("KEY_PATH", "certs/acp_cert.pem")
-	rootCA := getEnv("ROOT_CA", "certs/acp_cert.pem")
-
-	if serverPort, err = strconv.Atoi(getEnv("PORT", "18888")); err != nil {
-		log.Fatalln(err)
-	}
-
-	if issuerURL, err = url.Parse(getEnv("ISSUER_URL", "https://localhost:8443/default/default")); err != nil {
-		log.Fatal("cloud not parse issuer url")
-	}
-
-	if redirectURL, err = url.Parse(fmt.Sprintf("http://%v:%v/callback", getEnv("REDIRECT_HOST", "localhost"), serverPort)); err != nil {
-		log.Fatal("cloud not parse redirect url")
-	}
-
-	issuerURL, authorizeEndpoint, tokenEndpoint = getEndpointURLs()
-
-	cfg := acp.Config{
-		ClientID:     clientID,
-		RedirectURL:  redirectURL,
-		TokenURL:     tokenEndpoint,
-		AuthorizeURL: authorizeEndpoint,
-		IssuerURL:    issuerURL,
-		CertFile:     certPath,
-		KeyFile:      keyPath,
-		RootCA:       rootCA,
-		Scopes:       []string{"openid"},
-	}
-
-	if client, err = acp.New(cfg); err != nil {
-		log.Fatalln(err)
+	if client, err = acp.New(config.NewClientConfig()); err != nil {
+		log.Fatalf("failed to get oauth client %v", err)
 	}
 
 	if authorizeURL, csrf, err = client.AuthorizeURL(); err != nil {
-		log.Println(err)
-		return
+		log.Fatal(err)
 	}
 
 	handler := http.NewServeMux()
-	handler.HandleFunc("/callback", callback(client))
-	handler.HandleFunc("/login", login(client))
+	handler.HandleFunc("/callback", callback(client, csrf))
+	handler.HandleFunc("/login", login(authorizeURL))
 
 	server := &http.Server{
-		Addr:    fmt.Sprintf(":%v", serverPort),
+		Addr:    fmt.Sprintf(":%v", config.PORT),
 		Handler: handler,
 		TLSConfig: &tls.Config{
 			MinVersion:               tls.VersionTLS12,
@@ -95,7 +104,7 @@ func main() {
 		TLSNextProto: make(map[string]func(*http.Server, *tls.Conn, http.Handler), 0),
 	}
 
-	fmt.Printf("Login endpoint available at: http://localhost:%v/login\nCallback endpoint available at: %v\n\n", serverPort, cfg.RedirectURL)
+	fmt.Printf("Login endpoint available at: http://localhost:%v/login\nCallback endpoint available at: %v\n\n", config.PORT, client.Config.RedirectURL)
 	if err := server.ListenAndServe(); err != http.ErrServerClosed {
 		log.Fatalln(err)
 	} else {
@@ -103,14 +112,13 @@ func main() {
 	}
 }
 
-func login(client acp.Client) func(w http.ResponseWriter, r *http.Request) {
+func login(authorizeURL string) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, authorizeURL, http.StatusTemporaryRedirect)
 	}
-
 }
 
-func callback(client acp.Client) func(http.ResponseWriter, *http.Request) {
+func callback(client acp.Client, csrf acp.CSRF) func(http.ResponseWriter, *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var (
 			token acp.Token
@@ -132,45 +140,6 @@ func callback(client acp.Client) func(http.ResponseWriter, *http.Request) {
 	}
 }
 
-func getEnv(key, defaultValue string) string {
-	value := os.Getenv(key)
-	if value == "" {
-		return defaultValue
-	}
-	return value
-}
-
-func getEndpointURLs() (issuer *url.URL, authorizeEndpoint *url.URL, tokenEndpoint *url.URL) {
-	var (
-		wk   string
-		resp *http.Response
-		err  error
-	)
-
-	if wk = getEnv("WELL_KNOWN_URL", ""); wk == "" {
-		log.Fatal("well known endpoint is required")
-	}
-
-	if resp, err = http.Get(wk); err != nil {
-		log.Fatalf("error retrieving .well-known %v", err)
-	}
-
-	var we WellKnownEndpoints
-	defer resp.Body.Close()
-	json.NewDecoder(resp.Body).Decode(&we)
-
-	if issuer, err = getEndpointURL(we.Issuer); err != nil {
-		log.Fatal("could not get /authorize endpoint from .well-known")
-	}
-	if authorizeEndpoint, err = getEndpointURL(we.AuthorizationEndpoint); err != nil {
-		log.Fatal("could not get /authorize endpoint from .well-known")
-	}
-	if tokenEndpoint, err = getEndpointURL(we.MtlsEndpointAliases.TokenEndpoint); err != nil {
-		log.Fatal("could not get /token endpoint from .well-known")
-	}
-	return issuer, authorizeEndpoint, tokenEndpoint
-}
-
 type WellKnownEndpoints struct {
 	Issuer                string              `json:"issuer"`
 	AuthorizationEndpoint string              `json:"authorization_endpoint"`
@@ -181,6 +150,26 @@ type MtlsEndpointAliases struct {
 	TokenEndpoint string `json:"token_endpoint"`
 }
 
-func getEndpointURL(s string) (*url.URL, error) {
-	return url.Parse(s)
+func (c *Config) fetchEndpointURLs() {
+	var (
+		resp *http.Response
+		we   WellKnownEndpoints
+		err  error
+	)
+
+	if resp, err = http.Get(c.WellKnownURL.String()); err != nil {
+		log.Fatalf("error retrieving .well-known %v", err)
+	}
+	defer resp.Body.Close()
+	json.NewDecoder(resp.Body).Decode(&we)
+
+	if c.IssuerURL, err = url.Parse(we.Issuer); err != nil {
+		log.Fatal("could not get /issure endpoint from .well-known")
+	}
+	if c.AuthorizeEndpoint, err = url.Parse(we.AuthorizationEndpoint); err != nil {
+		log.Fatal("could not get /authorize endpoint from .well-known")
+	}
+	if c.TokenEndpoint, err = url.Parse(we.MtlsEndpointAliases.TokenEndpoint); err != nil {
+		log.Fatal("could not get /token endpoint from .well-known")
+	}
 }

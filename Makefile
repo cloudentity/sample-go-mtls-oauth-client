@@ -1,11 +1,11 @@
 .PHONY: build
 build:
-	docker-compose up --build
+	docker-compose up -d --build
 
 .PHONY: run
 run:
-	docker-compose up
+	docker-compose up -d
 
-.PHONY: test
-test:
-   docker run -d -p 18888:18888 oauth-client
+.PHONY: stop
+stop:
+   docker-compose down
