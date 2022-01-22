@@ -47,18 +47,13 @@ Optionally
 4. Replace the certs in /certs and update .env to use your desired certs. 
 5. From the root directory of the project run the following to build and run the sample client app
 ```
-make build
+make run
 ```
 After successfully starting the application will print the following logs:
 
 ```
 Login endpoint available at: http://localhost:18888/login
 Callback endpoint available at: http://localhost:18888/callback
-```
-
-To stop the application run
-```
-make stop
 ```
 
 ## Documentation
