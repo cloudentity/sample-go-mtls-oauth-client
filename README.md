@@ -32,9 +32,9 @@ This is a sample Go OAuth client using mTLS certificates for authentication with
 ![redirect url location](https://github.com/cloudentity/sample-go-mtls-oauth-client/blob/feature/aut-5045/img/redi.png?raw=true)
 11. While here copy the "Client ID". This will be used in the environment variables for running the sample oauth client.
 12. On the left navigation menu choose "Settings"
-![workspace overview](https://docs.authorization.cloudentity.com/uploads/tut_mtls_create_application.png)
-13. Choose the "Authorization" tab.
 ![settings overview](https://docs.authorization.cloudentity.com/uploads/tut_mtls_select_settings_auth.png)
+13. Choose the "Authorization" tab.
+![settings oauth tab overview](https://github.com/cloudentity/sample-go-mtls-oauth-client/blob/feature/aut-5045/img/oau-ta.png?raw=true)
 14. Scroll to the bottom of the "Authorizations" tab and paste in "Trusted client certificates" your rootCA contents. In the example provided it is the contents of `ca.pem`.
 ![pasting in rootCA](https://docs.authorization.cloudentity.com/uploads/tut_mtls_add_root_ca.png)
 
