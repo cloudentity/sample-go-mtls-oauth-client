@@ -18,7 +18,7 @@ This is a sample Go OAuth client using mTLS certificates for authentication with
 2. Choose your workspace. This example uses the "mtls-workspace" workspace.
 ![choose workspace](https://docs.authorization.cloudentity.com/uploads/tut_mtls_select_workspace.png)
 3. Go to "Applications" in the left side bar and choose "Create Application". Then choose "Create"
-![workspace overview](https://docs.authorization.cloudentity.com/uploads/tut_mtls_create_application.png)
+![workspace overview](https://github.com/cloudentity/sample-go-mtls-oauth-client/blob/feature/aut-5045/img/crea-ap.png?raw=true)
 4. Give the new application a name and choose "Server Web Application"
 ![create new application](https://docs.authorization.cloudentity.com/uploads/tut_mtls_provide_new_app_details.png)
 5. Choose the "Scopes" tab and scroll down and toggle "OpenID" to on
