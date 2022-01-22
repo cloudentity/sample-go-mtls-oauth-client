@@ -38,7 +38,7 @@ This is a sample Go OAuth client using mTLS certificates for authentication with
 14. Scroll to the bottom of the "Authorizations" tab and paste in "Trusted client certificates" your rootCA contents. In the example provided it is the contents of `ca.pem`.
 ![pasting in rootCA](https://docs.authorization.cloudentity.com/uploads/tut_mtls_add_root_ca.png)
 
-Your workspace is now prepare. 
+Your workspace is now prepared. 
 
 ### Build and run the Go oauth client sample
 
