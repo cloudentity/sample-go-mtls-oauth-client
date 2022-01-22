@@ -15,7 +15,7 @@ This is a sample Go OAuth client using mTLS certificates for authentication with
 ### How to configure the Cloudentity SAAS workspace
 1. Sign in [Cloudentity](https://authz.cloudentity.io/)
 ![sign in](https://docs.authorization.cloudentity.com/uploads/tut_auth_login.png)
-2. Choose your workspace. This example uses the default workspace.
+2. Choose your workspace. This example uses the "mtls-workspace" workspace.
 ![choose workspace](https://docs.authorization.cloudentity.com/uploads/tut_mtls_select_workspace.png)
 3. Go to "Applications" in the left side bar and choose "Create Application". Then choose "Create"
 ![workspace overview](https://docs.authorization.cloudentity.com/uploads/tut_mtls_create_application.png)
