@@ -51,7 +51,7 @@ Optionally
 ```
 make run
 ```
-After successfully starting the application will print the following logs:
+After successfully starting the application you will see the following console logs:
 
 ```
 Login endpoint available at: http://localhost:18888/login
