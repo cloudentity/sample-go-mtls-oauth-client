@@ -16,10 +16,4 @@ services:
       - CERT_PATH=${CERT_PATH}
       - KEY_PATH=${KEY_PATH}
       - ROOT_CA=${ROOT_CA}
-    networks:
-      - clientnet
-networks:
-  clientnet:
-    external: true
-    name: authorization_system
 
