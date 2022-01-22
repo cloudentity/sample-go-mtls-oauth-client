@@ -25,11 +25,11 @@ This is a sample Go OAuth client using mTLS certificates for authentication with
 ![scopes overview](https://docs.authorization.cloudentity.com/uploads/tut_mtls_provide_new_app_scopes.png)
 6. Choose the "Oauth" tab and scroll down to "Token Endpoint Authentication Method". Click it and choose "TLS Client Authentication" from the dropdown menu.
 7. While still on the "Oauth" tab scroll down and find "Certificate Metadata". Click it to see the menu. Depending on how you want to enter the information from your certificate choose the appropriate selection. If using the included certs in thie repo choose "TLS_CLIENT_AUTH_SAN_DNS". The textfield beneath this entry will given instructions on what to enter. In this example "TLS_CLIENT_AUTH_SAN_DNS" is chosen so "DNS Name SAN entry" appears above the textfield below.
-![tls configuration](image/tls-cl-au.png?raw=true)
+![tls configuration](img/tls-cl-au.png)
 8. In the textfield below "Certificate Metadata" (if you chose "TLS_CLIENT_AUTH_SAN_DNS" it will have the title "DNS Name SAN entry") enter the appropriate value. For the included cert it is "acp".
 9. Scroll down and choose "Save Changes"
 10. On the right-hand side, choose "Setup a redirect URI for your application". Enter your redirecit URI. For the sample application enter `http://localhost:18888/callback` then click "Save".
-![redirect url location](image/redi.png?raw=true)
+![redirect url location](img/redi.png)
 11. While here copy the "Client ID". This will be used in the environment variables for running the sample oauth client.
 12. On the left navigation menu choose "Settings"
 ![workspace overview](https://docs.authorization.cloudentity.com/uploads/tut_mtls_create_application.png)
