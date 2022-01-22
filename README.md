@@ -9,10 +9,10 @@ This is a sample Go OAuth client using mTLS certificates for authentication with
 * Signed certificate
 
 ## To run the sample Oauth client requires two primary tasks:
-1. Prepare your Cloudentity SAAS workspace
-2. Run the sample oauth client app
+1. [Prepare your Cloudentity SAAS workspace](#configure-cloudentity-saas-workspace)
+2. [Run the sample oauth client app](#build-and-run-the-go-oauth-client-sample)
 
-### How to configure the Cloudentity SAAS workspace
+### Configure Cloudentity SAAS workspace
 1. Sign in [Cloudentity](https://authz.cloudentity.io/)
 ![sign in](https://docs.authorization.cloudentity.com/uploads/tut_auth_login.png)
 2. Choose your workspace. This example uses the "mtls-workspace" workspace.
@@ -40,7 +40,7 @@ This is a sample Go OAuth client using mTLS certificates for authentication with
 
 Your workspace is now prepare. 
 
-### How to build and run the Go oauth client sample
+### Build and run the Go oauth client sample
 
 1. Go to the .env file in the root directory.
 2. Enter your Client ID.
