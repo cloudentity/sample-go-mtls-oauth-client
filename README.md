@@ -45,8 +45,7 @@ Your workspace is now prepared.
 1. Go to the .env file in the root directory.
 2. Enter your Client ID.
 3. Enter your .well-known URI
-Optionally
-4. Replace the certs in /certs and update .env to use your desired certs. 
+4. Optionally: Replace the certs in /certs and update .env to use your desired certs. 
 5. From the root directory of the project run the following to build and run the sample client app
 ```
 make run
