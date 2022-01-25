@@ -75,7 +75,8 @@ Callback endpoint available at: http://localhost:18888/callback
 ![bind services and save](https://docs.authorization.cloudentity.com/uploads/bind.png)
 7. If not selected, choose the "Quickstart" tab. Follow the instructions shown for downloading and running Pyron.
 ![choose apis](https://docs.authorization.cloudentity.com/uploads/quickstart.png)
-8. After running Pyron, go to the .env file in the root of this project repository and change "USE_PYRON" to true.
+8. After running Pyron, go to the .env file in the root of this project repository and change "USE_PYRON" to true and set "X_SSL_CERT_HASH" equal to your "x5t#S256"
+   certificate thumbprint which you can get from the access token retreived above.
 9. Run the sample oauth client app
 ```
 make run
