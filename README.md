@@ -1,6 +1,7 @@
 # sample-go-mtls-oauth-client
 
-This is a sample Go OAuth client using mTLS certificates for authentication with Cloudentity’s Authorization Control Plane SAAS. 
+This is a sample Go OAuth client using mTLS certificates for authentication with Cloudentity’s Authorization Control Plane SaaS. Additionally, this example demonstrates 
+using the Cloudentity Pyron API Gateway.
 
 ## Prerequisites
 
@@ -8,9 +9,10 @@ This is a sample Go OAuth client using mTLS certificates for authentication with
 * Golang
 * Signed certificate
 
-## To run the sample Oauth client requires two primary tasks:
+## To run the sample Oauth client requires two primary tasks and a third, optional, task:
 1. [Prepare your Cloudentity SAAS workspace](#configure-cloudentity-saas-workspace)
 2. [Run the sample oauth client app](#build-and-run-the-go-oauth-client-sample)
+3. [Prepare the Pyron Authorizer](#using-pyron-api-gateway)
 
 ### Configure Cloudentity SAAS workspace
 1. Sign in [Cloudentity](https://authz.cloudentity.io/)
@@ -57,6 +59,45 @@ Login endpoint available at: http://localhost:18888/login
 Callback endpoint available at: http://localhost:18888/callback
 ```
 
+### Using Pyron API Gateway
+
+1. Sign in [Cloudentity](https://authz.cloudentity.io/)
+![sign in](https://docs.authorization.cloudentity.com/uploads/tut_auth_login.png)
+2. Choose your workspace. This example uses the "mtls-workspace" workspace.
+![choose workspace](https://docs.authorization.cloudentity.com/uploads/tut_mtls_select_workspace.png)
+3. Choose "APIs" on the left side bar.
+![choose apis](https://docs.authorization.cloudentity.com/uploads/apis.png)
+4. Choose the "Gateways" tab.
+![choose gateway tab](https://docs.authorization.cloudentity.com/uploads/gtwy_tab.png)
+5. Choose "Add Gateway".
+![add gateway](https://docs.authorization.cloudentity.com/uploads/add_gtwy.png)
+6. Select "Pyron API Gateway" and give it a name, description, and check "Create and bind services automatically".
+![bind services and save](https://docs.authorization.cloudentity.com/uploads/bind.png)
+7. If not selected, choose the "Quickstart" tab. Follow the instructions shown for downloading and running Pyron.
+![choose apis](https://docs.authorization.cloudentity.com/uploads/quickstart.png)
+8. After running Pyron, go to the .env file in the root of this project repository and change "USE_PYRON" to true.
+9. Run the sample oauth client app
+```
+make run
+```
+10. Now, after getting an access token you will have the option to choose 'Fetch Balance' on the access token screen.
+11. Create a sample policy (link below with step by step instructions and screen shots.)
+ 1. Choose "Policies" on the left menu.
+ 2. Choose "Create Policy". Choose "API Request" as the Policy type. Give the policy a name and choose "Cloudentity" as the policy language and choose "Create".
+ 3. In the policy editor, Delete the existing policy. Then click the "+" sign to add a new validator.
+ 4. Choose "Attributes" then choose "Add field".
+ 5. From the "Source" drop down choose "Access Token".
+ 6. In the field, choose "Custom Value" from the drop down menu.
+ 7. Under "Full Path" enter "cnf.x5t#S256".
+ 8. Choose "Equals" and from the "Target" drop down choose "Request".
+ 9. In the "field attribute name" choose "Request Headers". 
+ 10. In "full path" after "headers." enter "x-ssl-cert-hash".
+ 11. Add another validator again choosing "Attributes" -> "Add Field". The from "Source" choose "Access Token". 
+ 12. Under "Field/attribute" choose "Custom Value".
+ 13. In "full path" enter "cnf.x5t#S256" and choose "present".
+
+Now if you enter an incorrect hash or omit the header or the hash you will fail the validation.
+
 ## Documentation
 
 The steps for this example can be found at
@@ -66,3 +107,5 @@ An overview of mTLS-based client Authentication can be found
 [mTLS-based Client Authentication](https://docs.authorization.cloudentity.com/features/oauth/client_auth/tls_client_auth/?q=mtls)
 
 Authorization Control Plane extensive documentation can be found at [Cloudentity Docs](https://docs.authorization.cloudentity.com/)
+
+Protecting API on Pyron API Gateway can be found at [Protecting API on Pyron API Gateway](https://docs.authorization.cloudentity.com/guides/developer/protect/pyron/pyron/?q=pyron)

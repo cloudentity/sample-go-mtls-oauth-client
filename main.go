@@ -7,10 +7,18 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"path/filepath"
+	"text/template"
 
 	"github.com/caarlos0/env"
 	acp "github.com/cloudentity/acp-client-go"
 )
+
+// in-memory token test store
+var token acp.Token
+var templ *template.Template
+var usePyron bool
+var xsslCertHash string
 
 type Config struct {
 	ClientID          string `env:"CLIENT_ID,required"`
@@ -24,6 +32,8 @@ type Config struct {
 	IssuerURL         *url.URL `env:"ISSUER_URL"`
 	AuthorizeEndpoint *url.URL `env:"AUTHORIZATION_ENDPOINT"`
 	TokenEndpoint     *url.URL `env:"MTLS_ENDPOINT_ALIASES_TOKEN_ENDPOINT"`
+	UsePyron          bool     `env:"USE_PYRON,required"`
+	XSSLCertHash      string   `env:"X_SSL_CERT_HASH"`
 }
 
 func (c Config) NewClientConfig() acp.Config {
@@ -59,7 +69,18 @@ func LoadConfig() (config Config, err error) {
 	}
 
 	config.fetchEndpointURLs()
+	usePyron = config.UsePyron
+	xsslCertHash = config.XSSLCertHash
+
 	return config, err
+}
+
+func layoutFiles() []string {
+	files, err := filepath.Glob("templates/*.html")
+	if err != nil {
+		log.Fatal(err)
+	}
+	return files
 }
 
 func main() {
@@ -83,8 +104,14 @@ func main() {
 		log.Fatal(err)
 	}
 
+	if templ, err = template.ParseFiles(layoutFiles()...); err != nil {
+		log.Fatal(err)
+	}
+
 	handler := http.NewServeMux()
 	handler.HandleFunc("/callback", callback(client, csrf))
+	handler.HandleFunc("/home", home())
+	handler.HandleFunc("/balance", balance(client))
 	handler.HandleFunc("/login", login(authorizeURL))
 
 	server := &http.Server{
@@ -121,22 +148,66 @@ func login(authorizeURL string) func(w http.ResponseWriter, r *http.Request) {
 func callback(client acp.Client, csrf acp.CSRF) func(http.ResponseWriter, *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var (
-			token acp.Token
-			// The request will contain this code to exchange it for an access token.
 			code = r.URL.Query().Get("code")
 			err  error
 		)
 
-		// Exchange code for an access token.
 		if token, err = client.Exchange(code, csrf.State, csrf); err != nil {
 			log.Printf("%v\n", err)
 			w.Write([]byte(err.Error()))
 			return
 		}
 
-		if err = json.NewEncoder(w).Encode(&token); err != nil {
-			log.Println(err)
+		http.Redirect(w, r, "/home", http.StatusFound)
+	}
+}
+
+func home() func(w http.ResponseWriter, r *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if token.AccessToken == "" {
+			templ.ExecuteTemplate(w, "error", token)
+			return
 		}
+		tokenResult := struct {
+			Token    acp.Token
+			UsePyron bool
+		}{
+			Token:    token,
+			UsePyron: usePyron,
+		}
+		templ.ExecuteTemplate(w, "bootstrap", tokenResult)
+	}
+}
+
+func balance(client acp.Client) func(w http.ResponseWriter, r *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var (
+			req *http.Request
+			res *http.Response
+			err error
+		)
+		if token.AccessToken == "" {
+			templ.ExecuteTemplate(w, "error", token)
+			return
+		}
+		c := http.Client{}
+		if req, err = http.NewRequest("GET", fmt.Sprintf("http://pyron:8080/banking/balance?client_id=%s", client.Config.ClientID), nil); err != nil {
+			log.Println(err)
+			return
+		}
+
+		req.Header = http.Header{
+			"Content-Type":    []string{"application/json"},
+			"Authorization":   []string{fmt.Sprintf("Bearer %s", token.AccessToken)},
+			"x-ssl-cert-hash": []string{xsslCertHash},
+		}
+
+		if res, err = c.Do(req); err != nil {
+			log.Println(err)
+			return
+		}
+
+		templ.ExecuteTemplate(w, "balance", res)
 	}
 }
 
