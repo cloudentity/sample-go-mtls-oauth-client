@@ -62,19 +62,19 @@ Callback endpoint available at: http://localhost:18888/callback
 ### Using Pyron API Gateway
 
 1. Sign in [Cloudentity](https://authz.cloudentity.io/)
-![sign in](https://docs.authorization.cloudentity.com/uploads/tut_auth_login.png?raw=true)
+![sign in](https://docs.authorization.cloudentity.com/uploads/tut_auth_login.png)
 2. Choose your workspace. This example uses the "mtls-workspace" workspace.
-![choose workspace](https://docs.authorization.cloudentity.com/uploads/tut_mtls_select_workspace.png?raw=true)
+![choose workspace](https://docs.authorization.cloudentity.com/uploads/tut_mtls_select_workspace.png)
 3. Choose "APIs" on the left side bar.
-![choose apis](https://docs.authorization.cloudentity.com/uploads/apis.png?raw=true)
+![choose apis](https://github.com/cloudentity/sample-go-mtls-oauth-client/blob/feature/aut-5045/img/apis.png?raw=true)
 4. Choose the "Gateways" tab.
-![choose gateway tab](https://docs.authorization.cloudentity.com/uploads/gtwy_tab.png?raw=true)
+![choose gateway tab](https://github.com/cloudentity/sample-go-mtls-oauth-client/blob/feature/aut-5045/img/gtwy_tab.png?raw=true)
 5. Choose "Add Gateway".
-![add gateway](https://docs.authorization.cloudentity.com/uploads/add_gtwy.png?raw=true)
+![add gateway](https://github.com/cloudentity/sample-go-mtls-oauth-client/blob/feature/aut-5045/img/add_gtwy.png?raw=true)
 6. Select "Pyron API Gateway" and give it a name, description, and check "Create and bind services automatically".
-![bind services and save](https://docs.authorization.cloudentity.com/uploads/bind.png?raw=true)
+![bind services and save](hhttps://github.com/cloudentity/sample-go-mtls-oauth-client/blob/feature/aut-5045/img/bind.png?raw=true)
 7. If not selected, choose the "Quickstart" tab. Follow the instructions shown for downloading and running Pyron.
-![choose apis](https://docs.authorization.cloudentity.com/uploads/quickstart.png?raw=true)
+![choose apis](https://github.com/cloudentity/sample-go-mtls-oauth-client/blob/feature/aut-5045/img/quickstart.png?raw=true)
 8. After running Pyron, go to the .env file in the root of this project repository and change "USE_PYRON" to true and set "X_SSL_CERT_HASH" equal to your "x5t#S256"
    certificate thumbprint which you can get from the access token retreived above.
 9. Run the sample oauth client app
