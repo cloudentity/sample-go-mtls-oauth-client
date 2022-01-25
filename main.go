@@ -9,24 +9,25 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"github.com/cloudentity/sample-go-mtls-oauth-client/pkg/acp"
-	"github.com/gorilla/securecookie"
 	"io"
 	"log"
 	"net/http"
 	"strconv"
+
+	"github.com/cloudentity/sample-go-mtls-oauth-client/pkg/acp"
+	"github.com/gorilla/securecookie"
 )
 
 var (
 	acpOAuthConfig acp.Config
 	clientID       = flag.String("clientId", "", "Application client ID")
+	clientSecret   = flag.String("clientSecret", "", "Application client Secret")
 	issuerURL      = flag.String("issuerUrl", "https://localhost:8443/default/default", "Issuer URL with provided tenant, and server ID")
+	host           = flag.String("host", "localhost", "Host where the OAuth Server will redirect to")
 	port           = flag.String("port", "18888", "Port where callback, and login endpoints will be exposed")
-	host           = flag.String("host", "localhost", "Host where your client applications is running")
-	redirectHost   = flag.String("redirectHost", "localhost", "Host where the OAuth Server will redirect to")
-	certPath       = flag.String("cert", "certs/cert.pem", "A path to the file with a certificate")
-	keyPath        = flag.String("key", "certs/cert-key.pem", "A path to the file with a private key")
-	serverCertPath = flag.String("serverCert", "certs/server-cert.pem", "A path to the file with a server certificate")
+	certPath       = flag.String("cert", "certs/acp_cert.pem", "A path to the file with a certificate")
+	keyPath        = flag.String("key", "certs/acp_key.pem", "A path to the file with a private key")
+	serverCertPath = flag.String("serverCert", "certs/ca.pem", "A path to the file with a server certificate")
 	pkceEnabled    = flag.Bool("pkce", false, "Enables PKCE flow")
 
 	secureCookie = securecookie.New(securecookie.GenerateRandomKey(64), securecookie.GenerateRandomKey(32))
@@ -47,12 +48,13 @@ func main() {
 	}
 
 	acpOAuthConfig = acp.Config{
-		RedirectURL: fmt.Sprintf("http://%v:%v/callback", *redirectHost, serverPort),
-		ClientID:    *clientID,
-		Scopes:      []string{"openid"},
-		AuthURL:     fmt.Sprintf("%v/oauth2/authorize", *issuerURL),
-		TokenURL:    fmt.Sprintf("%v/oauth2/token", *issuerURL),
-		PKCEEnabled: *pkceEnabled,
+		RedirectURL:  fmt.Sprintf("http://%v:%v/callback", *host, serverPort),
+		ClientID:     *clientID,
+		ClientSecret: *clientSecret,
+		Scopes:       []string{"openid"},
+		AuthURL:      fmt.Sprintf("%v/oauth2/authorize", *issuerURL),
+		TokenURL:     fmt.Sprintf("%v/oauth2/token", *issuerURL),
+		PKCEEnabled:  *pkceEnabled,
 	}
 
 	if acpClient, err = acp.NewClient(*serverCertPath, *certPath, *keyPath, acpOAuthConfig); err != nil {
@@ -64,7 +66,7 @@ func main() {
 	handler.HandleFunc("/login", login)
 
 	server := &http.Server{
-		Addr:    fmt.Sprintf("%v:%v", *host, serverPort),
+		Addr:    fmt.Sprintf(":%d", serverPort),
 		Handler: handler,
 		TLSConfig: &tls.Config{
 			MinVersion:               tls.VersionTLS12,
@@ -80,7 +82,8 @@ func main() {
 		TLSNextProto: make(map[string]func(*http.Server, *tls.Conn, http.Handler), 0),
 	}
 
-	fmt.Printf("Login endpoint available at: http://%v/login\nCallback endpoint available at: %v\n\n", server.Addr, acpOAuthConfig.RedirectURL)
+	fmt.Printf("Login endpoint available at: http://%s:%d/login\n", *host, serverPort)
+	fmt.Printf("Callback endpoint available at: %v\n\n", acpOAuthConfig.RedirectURL)
 	if err := server.ListenAndServe(); err != http.ErrServerClosed {
 		log.Fatalln(err)
 	} else {

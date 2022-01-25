@@ -11,6 +11,8 @@ type Config struct {
 	RedirectURL string
 	// ClientID is the ID of our client registered in ACP.
 	ClientID string
+	// ClientSecretis the Secret of our client registered in ACP.
+	ClientSecret string
 	// Scopes must be a subset of scopes assigned to our application in ACP.
 	Scopes []string
 	// AuthURL is an endpoint where ACP verifies the identity of the resource owner, and gain authorization grant.

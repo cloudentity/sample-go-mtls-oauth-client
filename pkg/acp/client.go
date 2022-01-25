@@ -49,10 +49,11 @@ func NewClient(serverCertPath string, certPath string, keyPath string, cfg Confi
 
 func (c Client) Exchange(code string, verifier string) (body []byte, err error) {
 	values := url.Values{
-		"grant_type":   {"authorization_code"},
-		"code":         {code},
-		"client_id":    {c.config.ClientID},
-		"redirect_uri": {c.config.RedirectURL},
+		"grant_type":    {"authorization_code"},
+		"code":          {code},
+		"client_id":     {c.config.ClientID},
+		"client_secret": {c.config.ClientSecret},
+		"redirect_uri":  {c.config.RedirectURL},
 	}
 
 	if c.config.PKCEEnabled {
