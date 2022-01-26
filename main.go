@@ -2,13 +2,18 @@ package main
 
 import (
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
+	"runtime"
 	"text/template"
+	"time"
 
 	"github.com/caarlos0/env"
 	acp "github.com/cloudentity/acp-client-go"
@@ -19,6 +24,7 @@ var token acp.Token
 var templ *template.Template
 var usePyron bool
 var xsslCertHash string
+var resourceURL string
 
 type Config struct {
 	ClientID          string `env:"CLIENT_ID,required"`
@@ -33,6 +39,7 @@ type Config struct {
 	AuthorizeEndpoint *url.URL `env:"AUTHORIZATION_ENDPOINT"`
 	TokenEndpoint     *url.URL `env:"MTLS_ENDPOINT_ALIASES_TOKEN_ENDPOINT"`
 	UsePyron          bool     `env:"USE_PYRON,required"`
+	ResourceURL       string   `env:"RESOURCE_URL"`
 	XSSLCertHash      string   `env:"X_SSL_CERT_HASH"`
 }
 
@@ -71,6 +78,7 @@ func LoadConfig() (config Config, err error) {
 	config.fetchEndpointURLs()
 	usePyron = config.UsePyron
 	xsslCertHash = config.XSSLCertHash
+	resourceURL = config.ResourceURL
 
 	return config, err
 }
@@ -182,7 +190,6 @@ func home() func(w http.ResponseWriter, r *http.Request) {
 func balance(client acp.Client) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var (
-			req *http.Request
 			res *http.Response
 			err error
 		)
@@ -190,25 +197,97 @@ func balance(client acp.Client) func(w http.ResponseWriter, r *http.Request) {
 			templ.ExecuteTemplate(w, "error", token)
 			return
 		}
-		c := http.Client{}
-		if req, err = http.NewRequest("GET", fmt.Sprintf("http://pyron:8080/banking/balance?client_id=%s", client.Config.ClientID), nil); err != nil {
-			log.Println(err)
-			return
-		}
 
-		req.Header = http.Header{
-			"Content-Type":    []string{"application/json"},
-			"Authorization":   []string{fmt.Sprintf("Bearer %s", token.AccessToken)},
-			"x-ssl-cert-hash": []string{xsslCertHash},
-		}
-
-		if res, err = c.Do(req); err != nil {
+		if res, err = fetchResource(client); err != nil {
 			log.Println(err)
 			return
 		}
 
 		templ.ExecuteTemplate(w, "balance", res)
 	}
+}
+
+func fetchResource(client acp.Client) (res *http.Response, err error) {
+	var (
+		httpClient *http.Client
+		req        *http.Request
+	)
+	if httpClient, err = newHTTPClient(client.Config); err != nil {
+		return nil, err
+	}
+
+	if req, err = newHTTPRequest(client.Config.ClientID); err != nil {
+		return nil, err
+	}
+
+	return httpClient.Do(req)
+}
+
+func newHTTPClient(c acp.Config) (*http.Client, error) {
+	var (
+		pool  *x509.CertPool
+		cert  tls.Certificate
+		certs = []tls.Certificate{}
+		data  []byte
+		err   error
+	)
+
+	if c.CertFile != "" && c.KeyFile != "" {
+		if cert, err = tls.LoadX509KeyPair(c.CertFile, c.KeyFile); err != nil {
+			return nil, fmt.Errorf("failed to read certificate and private key %v", err)
+		}
+
+		certs = append(certs, cert)
+	}
+
+	if pool, err = x509.SystemCertPool(); err != nil {
+		return nil, fmt.Errorf("failed to read system root CAs %v", err)
+	}
+
+	if c.RootCA != "" {
+		if data, err = os.ReadFile(c.RootCA); err != nil {
+			return nil, fmt.Errorf("failed to read http client root ca: %w", err)
+		}
+
+		pool.AppendCertsFromPEM(data)
+	}
+
+	return &http.Client{
+		Timeout: c.Timeout,
+		Transport: &http.Transport{
+			Proxy: http.ProxyFromEnvironment,
+			DialContext: (&net.Dialer{
+				Timeout:   30 * time.Second,
+				KeepAlive: 30 * time.Second,
+				DualStack: true,
+			}).DialContext,
+			MaxIdleConns:          100,
+			ResponseHeaderTimeout: c.Timeout,
+			IdleConnTimeout:       90 * time.Second,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ExpectContinueTimeout: 1 * time.Second,
+			MaxIdleConnsPerHost:   runtime.GOMAXPROCS(0) + 1,
+			TLSClientConfig: &tls.Config{
+				RootCAs:      pool,
+				MinVersion:   tls.VersionTLS12,
+				Certificates: certs,
+			},
+		},
+	}, nil
+}
+
+func newHTTPRequest(clientID string) (req *http.Request, err error) {
+	if req, err = http.NewRequest("GET", fmt.Sprintf("%s?client_id=%s", resourceURL, clientID), nil); err != nil {
+		return nil, err
+	}
+
+	req.Header = http.Header{
+		"Content-Type":    []string{"application/json"},
+		"Authorization":   []string{fmt.Sprintf("Bearer %s", token.AccessToken)},
+		"x-ssl-cert-hash": []string{xsslCertHash},
+	}
+
+	return req, err
 }
 
 type WellKnownEndpoints struct {

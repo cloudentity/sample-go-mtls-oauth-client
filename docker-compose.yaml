@@ -18,6 +18,7 @@ services:
       - ROOT_CA=${ROOT_CA}
       - USE_PYRON=${USE_PYRON}
       - X_SSL_CERT_HASH=${X_SSL_CERT_HASH}
+      - RESOURCE_URL=${RESOURCE_URL}
     networks:
       - default
 networks:
