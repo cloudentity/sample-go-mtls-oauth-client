@@ -25,6 +25,7 @@ var templ *template.Template
 var usePyron bool
 var xsslCertHash string
 var resourceURL string
+var injectCertMode bool
 
 type Config struct {
 	ClientID          string `env:"CLIENT_ID,required"`
@@ -41,6 +42,7 @@ type Config struct {
 	UsePyron          bool     `env:"USE_PYRON,required"`
 	ResourceURL       string   `env:"RESOURCE_URL"`
 	XSSLCertHash      string   `env:"X_SSL_CERT_HASH"`
+	InjectCertMode    bool     `env:"INJECT_CERT_MODE,required"`
 }
 
 func (c Config) NewClientConfig() acp.Config {
@@ -79,6 +81,7 @@ func LoadConfig() (config Config, err error) {
 	usePyron = config.UsePyron
 	xsslCertHash = config.XSSLCertHash
 	resourceURL = config.ResourceURL
+	injectCertMode = config.InjectCertMode
 
 	return config, err
 }
@@ -282,9 +285,12 @@ func newHTTPRequest(clientID string) (req *http.Request, err error) {
 	}
 
 	req.Header = http.Header{
-		"Content-Type":    []string{"application/json"},
-		"Authorization":   []string{fmt.Sprintf("Bearer %s", token.AccessToken)},
-		"x-ssl-cert-hash": []string{xsslCertHash},
+		"Content-Type":  []string{"application/json"},
+		"Authorization": []string{fmt.Sprintf("Bearer %s", token.AccessToken)},
+	}
+
+	if injectCertMode {
+		req.Header.Add("x-ssl-cert-hash", xsslCertHash)
 	}
 
 	return req, err
