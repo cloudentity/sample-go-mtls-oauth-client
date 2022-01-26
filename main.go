@@ -271,9 +271,10 @@ func newHTTPClient(c acp.Config) (*http.Client, error) {
 			ExpectContinueTimeout: 1 * time.Second,
 			MaxIdleConnsPerHost:   runtime.GOMAXPROCS(0) + 1,
 			TLSClientConfig: &tls.Config{
-				RootCAs:      pool,
-				MinVersion:   tls.VersionTLS12,
-				Certificates: certs,
+				RootCAs:            pool,
+				MinVersion:         tls.VersionTLS12,
+				Certificates:       certs,
+				InsecureSkipVerify: true,
 			},
 		},
 	}, nil
