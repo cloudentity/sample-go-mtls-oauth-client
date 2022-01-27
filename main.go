@@ -17,6 +17,7 @@ import (
 
 	"github.com/caarlos0/env"
 	acp "github.com/cloudentity/acp-client-go"
+	"github.com/dgrijalva/jwt-go"
 )
 
 // in-memory token test store
@@ -179,12 +180,25 @@ func home() func(w http.ResponseWriter, r *http.Request) {
 			templ.ExecuteTemplate(w, "error", token)
 			return
 		}
+		parser := new(jwt.Parser)
+		t, _, err := parser.ParseUnverified(token.AccessToken, jwt.MapClaims{})
+		if err != nil {
+			log.Fatal(err)
+		}
+		b, err := json.MarshalIndent(t.Claims, "", "\t")
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		//fmt.Println(string(b))
 		tokenResult := struct {
 			Token    acp.Token
 			UsePyron bool
+			FormattedClaims        string
 		}{
 			Token:    token,
 			UsePyron: usePyron,
+			FormattedClaims:        string(b),
 		}
 		templ.ExecuteTemplate(w, "bootstrap", tokenResult)
 	}
