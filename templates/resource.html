@@ -1,0 +1,23 @@
+{{ define "resource" }}
+<html>
+<head>
+    <title>Resource Server Response</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body>
+    <div class="flex justify-start">
+        <p>Status: </p>
+        <pre class="mx-2 ml-5">{{ .Status }}</pre>
+
+    </div>
+    <div class="flex justify-start">
+        <p>Body: </p>
+        <pre class="mx-2 ml-5">{{ .Content }}</pre>
+
+    </div>
+
+</body>
+</html>
+{{ end }}

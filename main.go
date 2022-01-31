@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -123,7 +124,7 @@ func main() {
 	handler := http.NewServeMux()
 	handler.HandleFunc("/callback", callback(client, csrf))
 	handler.HandleFunc("/home", home())
-	handler.HandleFunc("/balance", balance(client))
+	handler.HandleFunc("/balance", resource(client))
 	handler.HandleFunc("/login", login(authorizeURL))
 
 	server := &http.Server{
@@ -190,25 +191,26 @@ func home() func(w http.ResponseWriter, r *http.Request) {
 			log.Fatal(err)
 		}
 
-		//fmt.Println(string(b))
 		tokenResult := struct {
-			Token    acp.Token
-			UsePyron bool
-			FormattedClaims        string
+			Token           acp.Token
+			UsePyron        bool
+			FormattedClaims string
 		}{
-			Token:    token,
-			UsePyron: usePyron,
-			FormattedClaims:        string(b),
+			Token:           token,
+			UsePyron:        usePyron,
+			FormattedClaims: string(b),
 		}
 		templ.ExecuteTemplate(w, "bootstrap", tokenResult)
 	}
 }
 
-func balance(client acp.Client) func(w http.ResponseWriter, r *http.Request) {
+func resource(client acp.Client) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var (
-			res *http.Response
-			err error
+			res          *http.Response
+			resBodyBytes []byte
+			indentedJSON []byte
+			err          error
 		)
 		if token.AccessToken == "" {
 			templ.ExecuteTemplate(w, "error", token)
@@ -219,8 +221,33 @@ func balance(client acp.Client) func(w http.ResponseWriter, r *http.Request) {
 			log.Println(err)
 			return
 		}
+		defer res.Body.Close()
 
-		templ.ExecuteTemplate(w, "balance", res)
+		if resBodyBytes, err = io.ReadAll(res.Body); err != nil {
+			log.Println(err)
+			return
+		}
+
+		m := map[string]string{}
+		if err = json.Unmarshal(resBodyBytes, &m); err != nil {
+			log.Println(err)
+			return
+		}
+
+		if indentedJSON, err = json.MarshalIndent(m, "", "\t"); err != nil {
+			log.Println(err)
+			return
+		}
+
+		resrourceRes := struct {
+			Status  int
+			Content string
+		}{
+			Status:  res.StatusCode,
+			Content: string(indentedJSON),
+		}
+
+		templ.ExecuteTemplate(w, "resource", resrourceRes)
 	}
 }
 
