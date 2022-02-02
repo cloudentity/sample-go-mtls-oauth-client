@@ -6,7 +6,7 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/dgrijalva/jwt-go"
+	"github.com/golang-jwt/jwt"
 )
 
 func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
