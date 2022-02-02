@@ -5,46 +5,45 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
-	"runtime"
 	"text/template"
-	"time"
 
 	"github.com/caarlos0/env"
 	acp "github.com/cloudentity/acp-client-go"
-	"github.com/dgrijalva/jwt-go"
+	"github.com/gorilla/securecookie"
+	"github.com/pkg/errors"
+	"github.com/sirupsen/logrus"
 )
 
-// in-memory token test store
-var token acp.Token
 var templ *template.Template
-var usePyron bool
-var xsslCertHash string
-var resourceURL string
-var injectCertMode bool
+var appStorage AppStorage
+
+type AppStorage struct {
+	CSRF  acp.CSRF
+	Token acp.Token
+}
 
 type Config struct {
-	ClientID          string `env:"CLIENT_ID,required"`
-	CertPath          string `env:"CERT_PATH,required"`
-	KeyPath           string `env:"KEY_PATH,required"`
-	RootCA            string `env:"ROOT_CA,required"`
-	PORT              int    `env:"PORT,required"`
-	RedirectHost      string `env:"REDIRECT_HOST,required"`
-	WellKnown         string `env:"WELL_KNOWN_URL,required"`
-	WellKnownURL      *url.URL
-	IssuerURL         *url.URL `env:"ISSUER_URL"`
-	AuthorizeEndpoint *url.URL `env:"AUTHORIZATION_ENDPOINT"`
-	TokenEndpoint     *url.URL `env:"MTLS_ENDPOINT_ALIASES_TOKEN_ENDPOINT"`
-	UsePyron          bool     `env:"USE_PYRON,required"`
-	ResourceURL       string   `env:"RESOURCE_URL"`
-	XSSLCertHash      string   `env:"X_SSL_CERT_HASH"`
-	InjectCertMode    bool     `env:"INJECT_CERT_MODE,required"`
+	ClientID           string `env:"CLIENT_ID,required"`
+	CertPath           string `env:"CERT_PATH,required"`
+	KeyPath            string `env:"KEY_PATH,required"`
+	RootCA             string `env:"ROOT_CA,required"`
+	InsecureSkipVerify bool   `env:"INSECURE_SKIP_VERIFY"`
+	PORT               int    `env:"PORT,required"`
+	RedirectHost       string `env:"REDIRECT_HOST,required"`
+	WellKnown          string `env:"WELL_KNOWN_URL,required"`
+	WellKnownURL       *url.URL
+	IssuerURL          *url.URL
+	AuthorizeEndpoint  *url.URL
+	TokenEndpoint      *url.URL
+	UsePyron           bool   `env:"USE_PYRON,required"`
+	ResourceURL        string `env:"RESOURCE_URL"`
+	XSSLCertHash       string `env:"X_SSL_CERT_HASH"`
+	InjectCertMode     bool   `env:"INJECT_CERT_MODE,required"`
 }
 
 func (c Config) NewClientConfig() acp.Config {
@@ -79,13 +78,11 @@ func LoadConfig() (config Config, err error) {
 		log.Fatalf("failed to parse wellknown as url %v", err)
 	}
 
-	config.fetchEndpointURLs()
-	usePyron = config.UsePyron
-	xsslCertHash = config.XSSLCertHash
-	resourceURL = config.ResourceURL
-	injectCertMode = config.InjectCertMode
-
 	return config, err
+}
+
+func loadTemplates() (*template.Template, error) {
+	return template.ParseFiles(layoutFiles()...)
 }
 
 func layoutFiles() []string {
@@ -96,178 +93,39 @@ func layoutFiles() []string {
 	return files
 }
 
-func main() {
+type Server struct {
+	Config       Config
+	Client       acp.Client
+	HttpClient   *http.Client
+	SecureCookie *securecookie.SecureCookie
+}
+
+func NewServer() (Server, error) {
 	var (
-		config       Config
-		authorizeURL string
-		csrf         acp.CSRF
-		client       acp.Client
-		err          error
+		client = Server{}
+		err    error
 	)
 
-	if config, err = LoadConfig(); err != nil {
-		log.Fatalf("failed to load config %v", err)
+	if client.Config, err = LoadConfig(); err != nil {
+		return client, errors.Wrapf(err, "failed to load config")
 	}
 
-	if client, err = acp.New(config.NewClientConfig()); err != nil {
-		log.Fatalf("failed to get oauth client %v", err)
+	client.Config.fetchEndpointURLs()
+
+	if client.Client, err = acp.New(client.Config.NewClientConfig()); err != nil {
+		return client, errors.Wrapf(err, "failed to init acp client")
 	}
 
-	if authorizeURL, csrf, err = client.AuthorizeURL(); err != nil {
-		log.Fatal(err)
+	if client.HttpClient, err = newHTTPClient(client.Client, client.Config); err != nil {
+		return client, errors.Wrapf(err, "failed to get http client")
 	}
 
-	if templ, err = template.ParseFiles(layoutFiles()...); err != nil {
-		log.Fatal(err)
-	}
+	client.SecureCookie = securecookie.New(securecookie.GenerateRandomKey(64), securecookie.GenerateRandomKey(32))
 
-	handler := http.NewServeMux()
-	handler.HandleFunc("/callback", callback(client, csrf))
-	handler.HandleFunc("/home", home())
-	handler.HandleFunc("/balance", resource(client))
-	handler.HandleFunc("/login", login(authorizeURL))
-
-	server := &http.Server{
-		Addr:    fmt.Sprintf(":%v", config.PORT),
-		Handler: handler,
-		TLSConfig: &tls.Config{
-			MinVersion:               tls.VersionTLS12,
-			CurvePreferences:         []tls.CurveID{tls.CurveP521, tls.CurveP384, tls.CurveP256},
-			PreferServerCipherSuites: true,
-			CipherSuites: []uint16{
-				tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
-				tls.TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
-				tls.TLS_RSA_WITH_AES_256_GCM_SHA384,
-				tls.TLS_RSA_WITH_AES_256_CBC_SHA,
-			},
-		},
-		TLSNextProto: make(map[string]func(*http.Server, *tls.Conn, http.Handler), 0),
-	}
-
-	fmt.Printf("Login endpoint available at: http://localhost:%v/login\nCallback endpoint available at: %v\n\n", config.PORT, client.Config.RedirectURL)
-	if err := server.ListenAndServe(); err != http.ErrServerClosed {
-		log.Fatalln(err)
-	} else {
-		log.Println("server closed!")
-	}
+	return client, nil
 }
 
-func login(authorizeURL string) func(w http.ResponseWriter, r *http.Request) {
-	return func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, authorizeURL, http.StatusTemporaryRedirect)
-	}
-}
-
-func callback(client acp.Client, csrf acp.CSRF) func(http.ResponseWriter, *http.Request) {
-	return func(w http.ResponseWriter, r *http.Request) {
-		var (
-			code = r.URL.Query().Get("code")
-			err  error
-		)
-
-		if token, err = client.Exchange(code, csrf.State, csrf); err != nil {
-			log.Printf("%v\n", err)
-			w.Write([]byte(err.Error()))
-			return
-		}
-
-		http.Redirect(w, r, "/home", http.StatusFound)
-	}
-}
-
-func home() func(w http.ResponseWriter, r *http.Request) {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if token.AccessToken == "" {
-			templ.ExecuteTemplate(w, "error", token)
-			return
-		}
-		parser := new(jwt.Parser)
-		t, _, err := parser.ParseUnverified(token.AccessToken, jwt.MapClaims{})
-		if err != nil {
-			log.Fatal(err)
-		}
-		b, err := json.MarshalIndent(t.Claims, "", "\t")
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		tokenResult := struct {
-			Token           acp.Token
-			UsePyron        bool
-			FormattedClaims string
-		}{
-			Token:           token,
-			UsePyron:        usePyron,
-			FormattedClaims: string(b),
-		}
-		templ.ExecuteTemplate(w, "bootstrap", tokenResult)
-	}
-}
-
-func resource(client acp.Client) func(w http.ResponseWriter, r *http.Request) {
-	return func(w http.ResponseWriter, r *http.Request) {
-		var (
-			res          *http.Response
-			resBodyBytes []byte
-			indentedJSON []byte
-			err          error
-		)
-		if token.AccessToken == "" {
-			templ.ExecuteTemplate(w, "error", token)
-			return
-		}
-
-		if res, err = fetchResource(client); err != nil {
-			log.Println(err)
-			return
-		}
-		defer res.Body.Close()
-
-		if resBodyBytes, err = io.ReadAll(res.Body); err != nil {
-			log.Println(err)
-			return
-		}
-
-		m := map[string]string{}
-		if err = json.Unmarshal(resBodyBytes, &m); err != nil {
-			log.Println(err)
-			return
-		}
-
-		if indentedJSON, err = json.MarshalIndent(m, "", "\t"); err != nil {
-			log.Println(err)
-			return
-		}
-
-		resrourceRes := struct {
-			Status  int
-			Content string
-		}{
-			Status:  res.StatusCode,
-			Content: string(indentedJSON),
-		}
-
-		templ.ExecuteTemplate(w, "resource", resrourceRes)
-	}
-}
-
-func fetchResource(client acp.Client) (res *http.Response, err error) {
-	var (
-		httpClient *http.Client
-		req        *http.Request
-	)
-	if httpClient, err = newHTTPClient(client.Config); err != nil {
-		return nil, err
-	}
-
-	if req, err = newHTTPRequest(client.Config.ClientID); err != nil {
-		return nil, err
-	}
-
-	return httpClient.Do(req)
-}
-
-func newHTTPClient(c acp.Config) (*http.Client, error) {
+func newHTTPClient(client acp.Client, config Config) (*http.Client, error) {
 	var (
 		pool  *x509.CertPool
 		cert  tls.Certificate
@@ -276,8 +134,8 @@ func newHTTPClient(c acp.Config) (*http.Client, error) {
 		err   error
 	)
 
-	if c.CertFile != "" && c.KeyFile != "" {
-		if cert, err = tls.LoadX509KeyPair(c.CertFile, c.KeyFile); err != nil {
+	if client.Config.CertFile != "" && client.Config.KeyFile != "" {
+		if cert, err = tls.LoadX509KeyPair(client.Config.CertFile, client.Config.KeyFile); err != nil {
 			return nil, fmt.Errorf("failed to read certificate and private key %v", err)
 		}
 
@@ -288,8 +146,8 @@ func newHTTPClient(c acp.Config) (*http.Client, error) {
 		return nil, fmt.Errorf("failed to read system root CAs %v", err)
 	}
 
-	if c.RootCA != "" {
-		if data, err = os.ReadFile(c.RootCA); err != nil {
+	if client.Config.RootCA != "" {
+		if data, err = os.ReadFile(client.Config.RootCA); err != nil {
 			return nil, fmt.Errorf("failed to read http client root ca: %w", err)
 		}
 
@@ -297,45 +155,60 @@ func newHTTPClient(c acp.Config) (*http.Client, error) {
 	}
 
 	return &http.Client{
-		Timeout: c.Timeout,
+		Timeout: client.Config.Timeout,
 		Transport: &http.Transport{
-			Proxy: http.ProxyFromEnvironment,
-			DialContext: (&net.Dialer{
-				Timeout:   30 * time.Second,
-				KeepAlive: 30 * time.Second,
-				DualStack: true,
-			}).DialContext,
-			MaxIdleConns:          100,
-			ResponseHeaderTimeout: c.Timeout,
-			IdleConnTimeout:       90 * time.Second,
-			TLSHandshakeTimeout:   10 * time.Second,
-			ExpectContinueTimeout: 1 * time.Second,
-			MaxIdleConnsPerHost:   runtime.GOMAXPROCS(0) + 1,
 			TLSClientConfig: &tls.Config{
 				RootCAs:            pool,
 				MinVersion:         tls.VersionTLS12,
 				Certificates:       certs,
-				InsecureSkipVerify: true,
+				InsecureSkipVerify: config.InsecureSkipVerify,
 			},
 		},
 	}, nil
 }
 
-func newHTTPRequest(clientID string) (req *http.Request, err error) {
-	if req, err = http.NewRequest("GET", fmt.Sprintf("%s?client_id=%s", resourceURL, clientID), nil); err != nil {
-		return nil, err
+func (s *Server) Start() error {
+	var err error
+
+	if templ, err = loadTemplates(); err != nil {
+		return err
 	}
 
-	req.Header = http.Header{
-		"Content-Type":  []string{"application/json"},
-		"Authorization": []string{fmt.Sprintf("Bearer %s", token.AccessToken)},
+	handler := http.NewServeMux()
+	handler.HandleFunc("/login", s.Login)
+	handler.HandleFunc("/callback", s.Callback)
+	handler.HandleFunc("/home", s.Home)
+	handler.HandleFunc("/resource", s.Resource)
+
+	httpServer := &http.Server{
+		Addr:         fmt.Sprintf(":%v", s.Config.PORT),
+		Handler:      handler,
+		TLSNextProto: make(map[string]func(*http.Server, *tls.Conn, http.Handler), 0),
 	}
 
-	if injectCertMode {
-		req.Header.Add("x-ssl-cert-hash", xsslCertHash)
+	fmt.Printf("Login endpoint available at: http://localhost:%v/login\nCallback endpoint available at: %v\n\n", s.Config.PORT, s.Client.Config.RedirectURL)
+	if err := httpServer.ListenAndServe(); err != http.ErrServerClosed {
+		log.Fatalln(err)
+	} else {
+		log.Println("server closed!")
 	}
 
-	return req, err
+	return nil
+}
+
+func main() {
+	var (
+		server Server
+		err    error
+	)
+
+	if server, err = NewServer(); err != nil {
+		logrus.WithError(err).Fatalf("failed to init server")
+	}
+
+	if err = server.Start(); err != nil {
+		logrus.WithError(err).Fatalf("failed to start server")
+	}
 }
 
 type WellKnownEndpoints struct {
@@ -359,7 +232,14 @@ func (c *Config) fetchEndpointURLs() {
 		log.Fatalf("error retrieving .well-known %v", err)
 	}
 	defer resp.Body.Close()
-	json.NewDecoder(resp.Body).Decode(&we)
+
+	if resp.StatusCode != http.StatusOK {
+		log.Fatal("failed to retreive .well-known contents. check that .well-known uri is correct")
+	}
+
+	if json.NewDecoder(resp.Body).Decode(&we); err != nil {
+		log.Fatalf("failed to decode .well-known URI %v", err)
+	}
 
 	if c.IssuerURL, err = url.Parse(we.Issuer); err != nil {
 		log.Fatal("could not get /issure endpoint from .well-known")
