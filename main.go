@@ -1,173 +1,248 @@
 package main
 
 import (
-	"bytes"
-	rand "crypto/rand"
-	"crypto/sha256"
 	"crypto/tls"
-	"encoding/base64"
+	"crypto/x509"
 	"encoding/json"
-	"flag"
 	"fmt"
-	"github.com/cloudentity/sample-go-mtls-oauth-client/pkg/acp"
-	"github.com/gorilla/securecookie"
-	"io"
 	"log"
 	"net/http"
-	"strconv"
+	"net/url"
+	"os"
+	"path/filepath"
+	"text/template"
+
+	"github.com/caarlos0/env"
+	acp "github.com/cloudentity/acp-client-go"
+	"github.com/cloudentity/acp-client-go/clients/oauth2/models"
+	"github.com/gorilla/securecookie"
+	"github.com/pkg/errors"
+	"github.com/sirupsen/logrus"
 )
 
-var (
-	acpOAuthConfig acp.Config
-	clientID       = flag.String("clientId", "", "Application client ID")
-	issuerURL      = flag.String("issuerUrl", "https://localhost:8443/default/default", "Issuer URL with provided tenant, and server ID")
-	port           = flag.String("port", "18888", "Port where callback, and login endpoints will be exposed")
-	host           = flag.String("host", "localhost", "Host where your client applications is running")
-	redirectHost   = flag.String("redirectHost", "localhost", "Host where the OAuth Server will redirect to")
-	certPath       = flag.String("cert", "certs/cert.pem", "A path to the file with a certificate")
-	keyPath        = flag.String("key", "certs/cert-key.pem", "A path to the file with a private key")
-	serverCertPath = flag.String("serverCert", "certs/server-cert.pem", "A path to the file with a server certificate")
-	pkceEnabled    = flag.Bool("pkce", false, "Enables PKCE flow")
+type AppStorage struct {
+	CSRF  acp.CSRF
+	Token acp.Token
+}
 
-	secureCookie = securecookie.New(securecookie.GenerateRandomKey(64), securecookie.GenerateRandomKey(32))
-)
+type Config struct {
+	ClientID           string `env:"CLIENT_ID,required"`
+	CertPath           string `env:"CERT_PATH,required"`
+	KeyPath            string `env:"KEY_PATH,required"`
+	RootCA             string `env:"ROOT_CA,required"`
+	InsecureSkipVerify bool   `env:"INSECURE_SKIP_VERIFY"`
+	PORT               int    `env:"PORT,required"`
+	RedirectHost       string `env:"REDIRECT_HOST,required"`
+	WellKnown          string `env:"WELL_KNOWN_URL,required"`
+	Endpoints          WellKnownEndpoints
+	UsePyron           bool   `env:"USE_PYRON,required"`
+	ResourceURL        string `env:"RESOURCE_URL"`
+	XSSLCertHash       string `env:"X_SSL_CERT_HASH"`
+	InjectCertMode     bool   `env:"INJECT_CERT_MODE,required"`
+}
 
-const challengeLength = 43
-
-func main() {
+func (c Config) NewClientConfig() (acp.Config, error) {
 	var (
-		serverPort int
-		acpClient  acp.Client
-		err        error
+		redirectURL *url.URL
+		err         error
 	)
 
-	flag.Parse()
-	if serverPort, err = strconv.Atoi(*port); err != nil {
-		log.Fatalln(err)
+	if redirectURL, err = url.Parse(fmt.Sprintf("http://%v:%v/callback", c.RedirectHost, c.PORT)); err != nil {
+		return acp.Config{}, errors.Wrap(err, "failed to get callback url from host")
 	}
 
-	acpOAuthConfig = acp.Config{
-		RedirectURL: fmt.Sprintf("http://%v:%v/callback", *redirectHost, serverPort),
-		ClientID:    *clientID,
-		Scopes:      []string{"openid"},
-		AuthURL:     fmt.Sprintf("%v/oauth2/authorize", *issuerURL),
-		TokenURL:    fmt.Sprintf("%v/oauth2/token", *issuerURL),
-		PKCEEnabled: *pkceEnabled,
+	return acp.Config{
+		ClientID:     c.ClientID,
+		RedirectURL:  redirectURL,
+		TokenURL:     c.Endpoints.TokenEndpoint,
+		AuthorizeURL: c.Endpoints.AuthorizationEndpoint,
+		IssuerURL:    c.Endpoints.Issuer,
+		CertFile:     c.CertPath,
+		KeyFile:      c.KeyPath,
+		RootCA:       c.RootCA,
+		Scopes:       []string{"openid"},
+	}, nil
+}
+
+func LoadConfig() (config Config, err error) {
+	if err = env.Parse(&config); err != nil {
+		return config, err
 	}
 
-	if acpClient, err = acp.NewClient(*serverCertPath, *certPath, *keyPath, acpOAuthConfig); err != nil {
-		log.Fatalln(err)
+	return config, err
+}
+
+func loadTemplates() (*template.Template, error) {
+	files, err := filepath.Glob("templates/*.html")
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get template file names")
+	}
+	return template.ParseFiles(files...)
+}
+
+type Server struct {
+	Config       Config
+	Client       acp.Client
+	HttpClient   *http.Client
+	SecureCookie *securecookie.SecureCookie
+	Tmpl         *template.Template
+	AppStorage   AppStorage
+}
+
+func NewServer() (Server, error) {
+	var (
+		config acp.Config
+		server = Server{}
+		err    error
+	)
+
+	if server.Tmpl, err = loadTemplates(); err != nil {
+		return server, errors.Wrapf(err, "failed to load templates")
 	}
 
-	handler := http.NewServeMux()
-	handler.HandleFunc("/callback", callback(acpClient))
-	handler.HandleFunc("/login", login)
+	if server.Config, err = LoadConfig(); err != nil {
+		return server, errors.Wrapf(err, "failed to load config")
+	}
 
-	server := &http.Server{
-		Addr:    fmt.Sprintf("%v:%v", *host, serverPort),
-		Handler: handler,
-		TLSConfig: &tls.Config{
-			MinVersion:               tls.VersionTLS12,
-			CurvePreferences:         []tls.CurveID{tls.CurveP521, tls.CurveP384, tls.CurveP256},
-			PreferServerCipherSuites: true,
-			CipherSuites: []uint16{
-				tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
-				tls.TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
-				tls.TLS_RSA_WITH_AES_256_GCM_SHA384,
-				tls.TLS_RSA_WITH_AES_256_CBC_SHA,
+	if server.Config.Endpoints, err = fetchEndpointURLs(server.Config.WellKnown); err != nil {
+		return server, errors.Wrap(err, "failed to fetch well-known endpoints")
+	}
+
+	if config, err = server.Config.NewClientConfig(); err != nil {
+		return server, errors.Wrapf(err, "failed to get client configuration")
+	}
+
+	if server.Client, err = acp.New(config); err != nil {
+		return server, errors.Wrapf(err, "failed to init acp client")
+	}
+
+	if server.HttpClient, err = newHTTPClient(server.Client, server.Config); err != nil {
+		return server, errors.Wrapf(err, "failed to get http client")
+	}
+
+	server.SecureCookie = securecookie.New(securecookie.GenerateRandomKey(64), securecookie.GenerateRandomKey(32))
+
+	return server, nil
+}
+
+func newHTTPClient(client acp.Client, config Config) (*http.Client, error) {
+	var (
+		pool  *x509.CertPool
+		cert  tls.Certificate
+		certs = []tls.Certificate{}
+		data  []byte
+		err   error
+	)
+
+	if client.Config.CertFile != "" && client.Config.KeyFile != "" {
+		if cert, err = tls.LoadX509KeyPair(client.Config.CertFile, client.Config.KeyFile); err != nil {
+			return nil, fmt.Errorf("failed to read certificate and private key %v", err)
+		}
+
+		certs = append(certs, cert)
+	}
+
+	if pool, err = x509.SystemCertPool(); err != nil {
+		return nil, fmt.Errorf("failed to read system root CAs %v", err)
+	}
+
+	if client.Config.RootCA != "" {
+		if data, err = os.ReadFile(client.Config.RootCA); err != nil {
+			return nil, fmt.Errorf("failed to read http client root ca: %w", err)
+		}
+
+		pool.AppendCertsFromPEM(data)
+	}
+
+	return &http.Client{
+		Timeout: client.Config.Timeout,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				RootCAs:            pool,
+				MinVersion:         tls.VersionTLS12,
+				Certificates:       certs,
+				InsecureSkipVerify: config.InsecureSkipVerify,
 			},
 		},
+	}, nil
+}
+
+func (s *Server) Start() error {
+	handler := http.NewServeMux()
+	handler.HandleFunc("/login", s.Login)
+	handler.HandleFunc("/callback", s.Callback)
+	handler.HandleFunc("/home", s.Home)
+	handler.HandleFunc("/resource", s.Resource)
+
+	httpServer := &http.Server{
+		Addr:         fmt.Sprintf(":%v", s.Config.PORT),
+		Handler:      handler,
 		TLSNextProto: make(map[string]func(*http.Server, *tls.Conn, http.Handler), 0),
 	}
 
-	fmt.Printf("Login endpoint available at: http://%v/login\nCallback endpoint available at: %v\n\n", server.Addr, acpOAuthConfig.RedirectURL)
-	if err := server.ListenAndServe(); err != http.ErrServerClosed {
+	fmt.Printf("Login endpoint available at: http://localhost:%v/login\nCallback endpoint available at: %v\n\n", s.Config.PORT, s.Client.Config.RedirectURL)
+	if err := httpServer.ListenAndServe(); err != http.ErrServerClosed {
 		log.Fatalln(err)
 	} else {
 		log.Println("server closed!")
 	}
+
+	return nil
 }
 
-func login(writer http.ResponseWriter, request *http.Request) {
-	var challenge string
+func main() {
+	var (
+		server Server
+		err    error
+	)
 
-	//If PKCE is enabled, generate code verifier and challenge.
-	if *pkceEnabled {
-		var (
-			encodedVerifier    string
-			encodedCookieValue string
-			err                error
-		)
-
-		verifier := make([]byte, challengeLength)
-		if _, err = io.ReadFull(rand.Reader, verifier); err != nil {
-			log.Printf("error while generating challenge, %v\n", err)
-			return
-		}
-
-		encodedVerifier = base64.RawURLEncoding.WithPadding(base64.NoPadding).EncodeToString(verifier)
-		if encodedCookieValue, err = secureCookie.Encode("verifier", encodedVerifier); err != nil {
-			log.Printf("error while encoding cookie, %v\n", err)
-			return
-		}
-
-		// To preserve code verifier between authorization and callback, we want to store it in a secure cookie.
-		cookie := http.Cookie{
-			Name:     "verifier",
-			Value:    encodedCookieValue,
-			Path:     "/",
-			Secure:   false,
-			HttpOnly: true,
-		}
-		http.SetCookie(writer, &cookie)
-
-		hash := sha256.New()
-		hash.Write([]byte(encodedVerifier))
-		challenge = base64.RawURLEncoding.WithPadding(base64.NoPadding).EncodeToString(hash.Sum([]byte{}))
+	if server, err = NewServer(); err != nil {
+		logrus.WithError(err).Fatalf("failed to init server")
 	}
 
-	http.Redirect(writer, request, acpOAuthConfig.AuthorizeURL(challenge), http.StatusTemporaryRedirect)
+	if err = server.Start(); err != nil {
+		logrus.WithError(err).Fatalf("failed to start server")
+	}
 }
 
-func callback(client acp.Client) func(http.ResponseWriter, *http.Request) {
-	return func(writer http.ResponseWriter, request *http.Request) {
-		var (
-			body          []byte
-			err           error
-			verfier       *http.Cookie
-			verifierValue string
-			prettyJSON    bytes.Buffer
+type WellKnownEndpoints struct {
+	Issuer                *url.URL `json:"issuer"`
+	AuthorizationEndpoint *url.URL `json:"authorization_endpoint"`
+	TokenEndpoint         *url.URL `json:"token_endpoint"`
+}
 
-			// The request will contain this code to exchange it for an access token.
-			code = request.URL.Query().Get("code")
-		)
+func fetchEndpointURLs(wellKnownURL string) (WellKnownEndpoints, error) {
+	var (
+		endpoints WellKnownEndpoints
+		resp      *http.Response
+		we        models.WellKnown
+		err       error
+	)
 
-		if *pkceEnabled {
-			if verfier, err = request.Cookie("verifier"); err != nil {
-				log.Printf("%v\n", err)
-				return
-			}
-
-			if err = secureCookie.Decode("verifier", verfier.Value, &verifierValue); err != nil {
-				log.Printf("%v\n", err)
-				return
-			}
-		}
-
-		// Exchange code for an access token, include code verifier to validate it against challenge in ACP.
-		if body, err = client.Exchange(code, verifierValue); err != nil {
-			log.Printf("%v\n", err)
-			return
-		}
-
-		if err = json.Indent(&prettyJSON, body, "", "\t"); err != nil {
-			log.Printf("error while decoding successful body response: %v\n", err)
-			return
-		}
-
-		if _, err = fmt.Fprint(writer, prettyJSON.String()); err != nil {
-			log.Printf("error while writting successful body response: %v\n", err)
-			return
-		}
+	if resp, err = http.Get(wellKnownURL); err != nil {
+		return endpoints, errors.Wrap(err, "error retrieving .well-known")
 	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return endpoints, errors.Errorf("failed to retreive .well-known contents with status code %d", resp.StatusCode)
+	}
+
+	if err = json.NewDecoder(resp.Body).Decode(&we); err != nil {
+		return endpoints, errors.Wrap(err, "failed to decode .well-known URI")
+	}
+
+	if endpoints.Issuer, err = url.Parse(we.Issuer); err != nil {
+		return endpoints, errors.Wrap(err, "could not get /issure endpoint from .well-known")
+	}
+
+	if endpoints.AuthorizationEndpoint, err = url.Parse(we.AuthorizationEndpoint); err != nil {
+		return endpoints, errors.Wrap(err, "could not get /authorize endpoint from .well-known")
+	}
+
+	if endpoints.TokenEndpoint, err = url.Parse(we.MtlsEndpointAliases.TokenEndpoint); err != nil {
+		return endpoints, errors.Wrap(err, "could not get /token endpoint from .well-known")
+	}
+
+	return endpoints, nil
 }

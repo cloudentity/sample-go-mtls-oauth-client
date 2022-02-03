@@ -1,0 +1,19 @@
+{{ define "bootstrap" }}
+<html>
+<head>
+    <title>Tokens</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body>
+    <div class="flex justify-around">
+        <div class="w-1/2 my-8 mx-2"><b>Access Token</b><p class="break-all">{{ .Token }}</p></div>
+        <pre class="w-1/2 my-8 mx-2">{{ .FormattedClaims }}</pre>
+    </div>
+    {{ if .UsePyron }}
+    <a class="flex justify-center underline text-blue-600 hover:text-blue-800" href="/resource">Call Resource Server API</a>
+    {{ end }}
+</body>
+</html>
+{{ end }}
