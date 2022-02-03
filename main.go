@@ -14,13 +14,11 @@ import (
 
 	"github.com/caarlos0/env"
 	acp "github.com/cloudentity/acp-client-go"
+	"github.com/cloudentity/acp-client-go/clients/oauth2/models"
 	"github.com/gorilla/securecookie"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 )
-
-var templ *template.Template
-var appStorage AppStorage
 
 type AppStorage struct {
 	CSRF  acp.CSRF
@@ -36,37 +34,34 @@ type Config struct {
 	PORT               int    `env:"PORT,required"`
 	RedirectHost       string `env:"REDIRECT_HOST,required"`
 	WellKnown          string `env:"WELL_KNOWN_URL,required"`
-	WellKnownURL       *url.URL
-	IssuerURL          *url.URL
-	AuthorizeEndpoint  *url.URL
-	TokenEndpoint      *url.URL
+	Endpoints          WellKnownEndpoints
 	UsePyron           bool   `env:"USE_PYRON,required"`
 	ResourceURL        string `env:"RESOURCE_URL"`
 	XSSLCertHash       string `env:"X_SSL_CERT_HASH"`
 	InjectCertMode     bool   `env:"INJECT_CERT_MODE,required"`
 }
 
-func (c Config) NewClientConfig() acp.Config {
+func (c Config) NewClientConfig() (acp.Config, error) {
 	var (
 		redirectURL *url.URL
 		err         error
 	)
 
 	if redirectURL, err = url.Parse(fmt.Sprintf("http://%v:%v/callback", c.RedirectHost, c.PORT)); err != nil {
-		log.Fatalf("failed to get callback url from host %v", err)
+		return acp.Config{}, errors.Wrap(err, "failed to get callback url from host")
 	}
 
 	return acp.Config{
 		ClientID:     c.ClientID,
 		RedirectURL:  redirectURL,
-		TokenURL:     c.TokenEndpoint,
-		AuthorizeURL: c.AuthorizeEndpoint,
-		IssuerURL:    c.IssuerURL,
+		TokenURL:     c.Endpoints.TokenEndpoint,
+		AuthorizeURL: c.Endpoints.AuthorizationEndpoint,
+		IssuerURL:    c.Endpoints.Issuer,
 		CertFile:     c.CertPath,
 		KeyFile:      c.KeyPath,
 		RootCA:       c.RootCA,
 		Scopes:       []string{"openid"},
-	}
+	}, nil
 }
 
 func LoadConfig() (config Config, err error) {
@@ -74,23 +69,15 @@ func LoadConfig() (config Config, err error) {
 		return config, err
 	}
 
-	if config.WellKnownURL, err = url.Parse(config.WellKnown); err != nil {
-		log.Fatalf("failed to parse wellknown as url %v", err)
-	}
-
 	return config, err
 }
 
 func loadTemplates() (*template.Template, error) {
-	return template.ParseFiles(layoutFiles()...)
-}
-
-func layoutFiles() []string {
 	files, err := filepath.Glob("templates/*.html")
 	if err != nil {
-		log.Fatal(err)
+		return nil, errors.Wrap(err, "failed to get template file names")
 	}
-	return files
+	return template.ParseFiles(files...)
 }
 
 type Server struct {
@@ -98,31 +85,44 @@ type Server struct {
 	Client       acp.Client
 	HttpClient   *http.Client
 	SecureCookie *securecookie.SecureCookie
+	Tmpl         *template.Template
+	AppStorage   AppStorage
 }
 
 func NewServer() (Server, error) {
 	var (
-		client = Server{}
+		config acp.Config
+		server = Server{}
 		err    error
 	)
 
-	if client.Config, err = LoadConfig(); err != nil {
-		return client, errors.Wrapf(err, "failed to load config")
+	if server.Tmpl, err = loadTemplates(); err != nil {
+		return server, errors.Wrapf(err, "failed to load templates")
 	}
 
-	client.Config.fetchEndpointURLs()
-
-	if client.Client, err = acp.New(client.Config.NewClientConfig()); err != nil {
-		return client, errors.Wrapf(err, "failed to init acp client")
+	if server.Config, err = LoadConfig(); err != nil {
+		return server, errors.Wrapf(err, "failed to load config")
 	}
 
-	if client.HttpClient, err = newHTTPClient(client.Client, client.Config); err != nil {
-		return client, errors.Wrapf(err, "failed to get http client")
+	if server.Config.Endpoints, err = fetchEndpointURLs(server.Config.WellKnown); err != nil {
+		return server, errors.Wrap(err, "failed to fetch well-known endpoints")
 	}
 
-	client.SecureCookie = securecookie.New(securecookie.GenerateRandomKey(64), securecookie.GenerateRandomKey(32))
+	if config, err = server.Config.NewClientConfig(); err != nil {
+		return server, errors.Wrapf(err, "failed to get client configuration")
+	}
 
-	return client, nil
+	if server.Client, err = acp.New(config); err != nil {
+		return server, errors.Wrapf(err, "failed to init acp client")
+	}
+
+	if server.HttpClient, err = newHTTPClient(server.Client, server.Config); err != nil {
+		return server, errors.Wrapf(err, "failed to get http client")
+	}
+
+	server.SecureCookie = securecookie.New(securecookie.GenerateRandomKey(64), securecookie.GenerateRandomKey(32))
+
+	return server, nil
 }
 
 func newHTTPClient(client acp.Client, config Config) (*http.Client, error) {
@@ -168,12 +168,6 @@ func newHTTPClient(client acp.Client, config Config) (*http.Client, error) {
 }
 
 func (s *Server) Start() error {
-	var err error
-
-	if templ, err = loadTemplates(); err != nil {
-		return err
-	}
-
 	handler := http.NewServeMux()
 	handler.HandleFunc("/login", s.Login)
 	handler.HandleFunc("/callback", s.Callback)
@@ -212,42 +206,43 @@ func main() {
 }
 
 type WellKnownEndpoints struct {
-	Issuer                string              `json:"issuer"`
-	AuthorizationEndpoint string              `json:"authorization_endpoint"`
-	MtlsEndpointAliases   MtlsEndpointAliases `json:"mtls_endpoint_aliases"`
+	Issuer                *url.URL `json:"issuer"`
+	AuthorizationEndpoint *url.URL `json:"authorization_endpoint"`
+	TokenEndpoint         *url.URL `json:"token_endpoint"`
 }
 
-type MtlsEndpointAliases struct {
-	TokenEndpoint string `json:"token_endpoint"`
-}
-
-func (c *Config) fetchEndpointURLs() {
+func fetchEndpointURLs(wellKnownURL string) (WellKnownEndpoints, error) {
 	var (
-		resp *http.Response
-		we   WellKnownEndpoints
-		err  error
+		endpoints WellKnownEndpoints
+		resp      *http.Response
+		we        models.WellKnown
+		err       error
 	)
 
-	if resp, err = http.Get(c.WellKnownURL.String()); err != nil {
-		log.Fatalf("error retrieving .well-known %v", err)
+	if resp, err = http.Get(wellKnownURL); err != nil {
+		return endpoints, errors.Wrap(err, "error retrieving .well-known")
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		log.Fatal("failed to retreive .well-known contents. check that .well-known uri is correct")
+		return endpoints, errors.Errorf("failed to retreive .well-known contents with status code %d", resp.StatusCode)
 	}
 
-	if json.NewDecoder(resp.Body).Decode(&we); err != nil {
-		log.Fatalf("failed to decode .well-known URI %v", err)
+	if err = json.NewDecoder(resp.Body).Decode(&we); err != nil {
+		return endpoints, errors.Wrap(err, "failed to decode .well-known URI")
 	}
 
-	if c.IssuerURL, err = url.Parse(we.Issuer); err != nil {
-		log.Fatal("could not get /issure endpoint from .well-known")
+	if endpoints.Issuer, err = url.Parse(we.Issuer); err != nil {
+		return endpoints, errors.Wrap(err, "could not get /issure endpoint from .well-known")
 	}
-	if c.AuthorizeEndpoint, err = url.Parse(we.AuthorizationEndpoint); err != nil {
-		log.Fatal("could not get /authorize endpoint from .well-known")
+
+	if endpoints.AuthorizationEndpoint, err = url.Parse(we.AuthorizationEndpoint); err != nil {
+		return endpoints, errors.Wrap(err, "could not get /authorize endpoint from .well-known")
 	}
-	if c.TokenEndpoint, err = url.Parse(we.MtlsEndpointAliases.TokenEndpoint); err != nil {
-		log.Fatal("could not get /token endpoint from .well-known")
+
+	if endpoints.TokenEndpoint, err = url.Parse(we.MtlsEndpointAliases.TokenEndpoint); err != nil {
+		return endpoints, errors.Wrap(err, "could not get /token endpoint from .well-known")
 	}
+
+	return endpoints, nil
 }

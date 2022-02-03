@@ -18,12 +18,12 @@ func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 	)
 
 	if authorizeURL, storage.CSRF, err = s.Client.AuthorizeURL(); err != nil {
-		renderError(w, ErrorDetails{http.StatusInternalServerError, fmt.Sprintf("failed to get authorization url: %+v", err)})
+		s.renderError(w, ErrorDetails{http.StatusInternalServerError, fmt.Sprintf("failed to get authorization url: %+v", err)})
 		return
 	}
 
 	if encodedCookieValue, err = s.SecureCookie.Encode("app", storage); err != nil {
-		renderError(w, ErrorDetails{http.StatusInternalServerError, fmt.Sprintf("error while encoding cookie: %+v", err)})
+		s.renderError(w, ErrorDetails{http.StatusInternalServerError, fmt.Sprintf("error while encoding cookie: %+v", err)})
 		return
 	}
 
@@ -45,22 +45,22 @@ func (s *Server) Callback(w http.ResponseWriter, r *http.Request) {
 	)
 
 	if errVal != "" {
-		renderError(w, ErrorDetails{http.StatusBadRequest, fmt.Sprintf("acp returned an error: %s: %s", errVal, r.URL.Query().Get("error_description"))})
+		s.renderError(w, ErrorDetails{http.StatusBadRequest, fmt.Sprintf("acp returned an error: %s: %s", errVal, r.URL.Query().Get("error_description"))})
 		return
 	}
 
 	if cookie, err = r.Cookie("app"); err != nil {
-		renderError(w, ErrorDetails{http.StatusBadRequest, fmt.Sprintf("failed to get app cookie: %+v", err)})
+		s.renderError(w, ErrorDetails{http.StatusBadRequest, fmt.Sprintf("failed to get app cookie: %+v", err)})
 		return
 	}
 
-	if err = s.SecureCookie.Decode("app", cookie.Value, &appStorage); err != nil {
-		renderError(w, ErrorDetails{http.StatusBadRequest, fmt.Sprintf("failed to decode app storage: %+v", err)})
+	if err = s.SecureCookie.Decode("app", cookie.Value, &s.AppStorage); err != nil {
+		s.renderError(w, ErrorDetails{http.StatusBadRequest, fmt.Sprintf("failed to decode app storage: %+v", err)})
 		return
 	}
 
-	if appStorage.Token, err = s.Client.Exchange(code, r.URL.Query().Get("state"), appStorage.CSRF); err != nil {
-		renderError(w, ErrorDetails{http.StatusBadRequest, fmt.Sprintf("failed to get token: %+v", err)})
+	if s.AppStorage.Token, err = s.Client.Exchange(code, r.URL.Query().Get("state"), s.AppStorage.CSRF); err != nil {
+		s.renderError(w, ErrorDetails{http.StatusBadRequest, fmt.Sprintf("failed to get token: %+v", err)})
 		return
 	}
 
@@ -75,23 +75,23 @@ func (s *Server) Home(w http.ResponseWriter, r *http.Request) {
 		err    error
 	)
 
-	if appStorage.Token.AccessToken == "" {
-		renderError(w, ErrorDetails{http.StatusBadRequest, "missing access token"})
+	if s.AppStorage.Token.AccessToken == "" {
+		s.renderError(w, ErrorDetails{http.StatusBadRequest, "missing access token"})
 		return
 	}
 
 	parser := new(jwt.Parser)
-	if token, _, err = parser.ParseUnverified(appStorage.Token.AccessToken, jwt.MapClaims{}); err != nil {
-		renderError(w, ErrorDetails{http.StatusBadRequest, fmt.Sprintf("unable to parse token %v", err)})
+	if token, _, err = parser.ParseUnverified(s.AppStorage.Token.AccessToken, jwt.MapClaims{}); err != nil {
+		s.renderError(w, ErrorDetails{http.StatusBadRequest, fmt.Sprintf("unable to parse token %v", err)})
 		return
 	}
 
 	if claims, err = json.MarshalIndent(token.Claims, "", "\t"); err != nil {
-		renderError(w, ErrorDetails{http.StatusBadRequest, fmt.Sprintf("unable to format claims from token %v", err)})
+		s.renderError(w, ErrorDetails{http.StatusBadRequest, fmt.Sprintf("unable to format claims from token %v", err)})
 		return
 	}
 
-	templ.ExecuteTemplate(w, "bootstrap", map[string]interface{}{"Token": token.Raw, "UsePyron": s.Config.UsePyron, "FormattedClaims": string(claims)})
+	s.Tmpl.ExecuteTemplate(w, "bootstrap", map[string]interface{}{"Token": token.Raw, "UsePyron": s.Config.UsePyron, "FormattedClaims": string(claims)})
 }
 
 func (s *Server) Resource(w http.ResponseWriter, r *http.Request) {
@@ -102,40 +102,40 @@ func (s *Server) Resource(w http.ResponseWriter, r *http.Request) {
 		err          error
 	)
 
-	if appStorage.Token.AccessToken == "" {
-		templ.ExecuteTemplate(w, "error", appStorage.Token)
+	if s.AppStorage.Token.AccessToken == "" {
+		s.Tmpl.ExecuteTemplate(w, "error", s.AppStorage.Token)
 		return
 	}
 
 	if res, err = s.fetchResource(); err != nil {
-		renderError(w, ErrorDetails{http.StatusBadRequest, fmt.Sprintf("client failed to fetch the resource %v", err)})
+		s.renderError(w, ErrorDetails{http.StatusBadRequest, fmt.Sprintf("client failed to fetch the resource %v", err)})
 		return
 	}
 	defer res.Body.Close()
 
 	if res.StatusCode != 200 && res.StatusCode != 403 {
-		renderError(w, ErrorDetails{http.StatusInternalServerError, fmt.Sprintf("unexpected status code returned from resource server %v", err)})
+		s.renderError(w, ErrorDetails{http.StatusInternalServerError, fmt.Sprintf("unexpected status code returned from resource server %v", err)})
 		return
 	}
 
 	if resBodyBytes, err = io.ReadAll(res.Body); err != nil {
-		renderError(w, ErrorDetails{http.StatusBadRequest, fmt.Sprintf("unable to fetch the resource %v", err)})
+		s.renderError(w, ErrorDetails{http.StatusBadRequest, fmt.Sprintf("unable to fetch the resource %v", err)})
 		return
 	}
 
 	m := map[string]string{}
 	if err = json.Unmarshal(resBodyBytes, &m); err != nil {
-		renderError(w, ErrorDetails{http.StatusInternalServerError, fmt.Sprintf("failed to unmarshal response from resource server %v", err)})
+		s.renderError(w, ErrorDetails{http.StatusInternalServerError, fmt.Sprintf("failed to unmarshal response from resource server %v", err)})
 		return
 	}
 
 	if indentedJSON, err = json.MarshalIndent(m, "", "\t"); err != nil {
-		renderError(w, ErrorDetails{http.StatusInternalServerError, fmt.Sprintf("failed to marshal the response %v", err)})
+		s.renderError(w, ErrorDetails{http.StatusInternalServerError, fmt.Sprintf("failed to marshal the response %v", err)})
 		return
 	}
 
 	resourceRes := map[string]interface{}{"Status": res.StatusCode, "Content": string(indentedJSON)}
-	templ.ExecuteTemplate(w, "resource", resourceRes)
+	s.Tmpl.ExecuteTemplate(w, "resource", resourceRes)
 }
 
 func (s *Server) fetchResource() (res *http.Response, err error) {
@@ -155,7 +155,7 @@ func (s *Server) newHTTPRequest() (req *http.Request, err error) {
 
 	req.Header = http.Header{
 		"Content-Type":  []string{"application/json"},
-		"Authorization": []string{fmt.Sprintf("Bearer %s", appStorage.Token.AccessToken)},
+		"Authorization": []string{fmt.Sprintf("Bearer %s", s.AppStorage.Token.AccessToken)},
 	}
 
 	// This is for demo purposes only. This can be configured in the environment variables.
@@ -171,6 +171,6 @@ type ErrorDetails struct {
 	Message string
 }
 
-func renderError(w http.ResponseWriter, details ErrorDetails) {
-	templ.ExecuteTemplate(w, "error", details)
+func (s *Server) renderError(w http.ResponseWriter, details ErrorDetails) {
+	s.Tmpl.ExecuteTemplate(w, "error", details)
 }
