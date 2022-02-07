@@ -82,7 +82,7 @@ Callback endpoint available at: http://localhost:18888/callback
 ```
 make run
 ```
-10. Now, after getting an access token you will have the option to choose 'Fetch Balance' on the access token screen.
+10. Now, after getting an access token you will have the option to choose 'Call Resource Server API' on the access token screen.
 11. Create a sample policy (link below with step by step instructions and screen shots.)
  1. Choose "Policies" on the left menu.
  2. Choose "Create Policy". Choose "API Request" as the Policy type. Give the policy a name and choose "Cloudentity" as the policy language and choose "Create".
