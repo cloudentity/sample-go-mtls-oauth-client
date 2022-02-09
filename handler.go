@@ -98,7 +98,6 @@ func (s *Server) Resource(w http.ResponseWriter, r *http.Request) {
 	var (
 		res          *http.Response
 		resBodyBytes []byte
-		indentedJSON []byte
 		err          error
 	)
 
@@ -123,18 +122,7 @@ func (s *Server) Resource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	m := map[string]string{}
-	if err = json.Unmarshal(resBodyBytes, &m); err != nil {
-		s.renderError(w, ErrorDetails{http.StatusInternalServerError, fmt.Sprintf("failed to unmarshal response from resource server %v", err)})
-		return
-	}
-
-	if indentedJSON, err = json.MarshalIndent(m, "", "\t"); err != nil {
-		s.renderError(w, ErrorDetails{http.StatusInternalServerError, fmt.Sprintf("failed to marshal the response %v", err)})
-		return
-	}
-
-	resourceRes := map[string]interface{}{"Status": res.StatusCode, "Content": string(indentedJSON)}
+	resourceRes := map[string]interface{}{"Status": res.StatusCode, "Content": string(resBodyBytes)}
 	s.Tmpl.ExecuteTemplate(w, "resource", resourceRes)
 }
 
